@@ -1,0 +1,132 @@
+:root {
+  color: #172033;
+  background: #eef2f6;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.workspace {
+  width: min(760px, 100%);
+  padding: 32px;
+  border: 1px solid #d6dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgb(31 44 71 / 0.08);
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: #395f8f;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.intro {
+  max-width: 620px;
+  margin: 18px 0 0;
+  color: #4d5b6f;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.status-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.status-panel > div {
+  min-height: 88px;
+  padding: 18px;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.label {
+  display: block;
+  margin-bottom: 8px;
+  color: #6a7789;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+strong {
+  display: block;
+  color: #182235;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.baseline-list {
+  display: grid;
+  gap: 10px;
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.baseline-list li {
+  padding-left: 18px;
+  color: #36465a;
+  line-height: 1.55;
+  position: relative;
+}
+
+.baseline-list li::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1f8a70;
+  position: absolute;
+  left: 0;
+  top: 0.72em;
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    padding: 18px;
+    place-items: stretch;
+  }
+
+  .workspace {
+    padding: 24px;
+  }
+
+  .status-panel {
+    grid-template-columns: 1fr;
+  }
+}
