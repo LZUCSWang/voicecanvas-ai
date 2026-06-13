@@ -1,4 +1,4 @@
-import type { DrawAction } from '../domain/drawingTypes';
+import type { DrawAction, DrawingHistoryAction } from '../domain/drawingTypes';
 import { parseLocalCommand } from './commands/localCommandParser';
 import { createSceneTemplateActions } from './scenes/sceneTemplates';
 
@@ -14,7 +14,7 @@ export type DevelopmentCommandSource = 'local' | 'preset';
 export interface DevelopmentCommandResolution {
   ok: boolean;
   source: DevelopmentCommandSource;
-  actions: DrawAction[];
+  actions: DrawingHistoryAction[];
   statusText: string;
   recentText: string;
   error?: string;
@@ -209,7 +209,7 @@ export function resolveDevelopmentCommand(input: string): DevelopmentCommandReso
   };
 }
 
-export function formatDrawAction(action: DrawAction): string {
+export function formatDrawAction(action: DrawingHistoryAction): string {
   switch (action.type) {
     case 'create':
       return action.objectType === 'text'
@@ -221,10 +221,16 @@ export function formatDrawAction(action: DrawAction): string {
       return '删除最近对象';
     case 'clear':
       return '清空画布';
+    case 'undo':
+      return '撤销上一步';
+    case 'redo':
+      return '重做上一步';
+    case 'export':
+      return action.format === 'svg' ? '导出 SVG' : '导出 PNG';
   }
 }
 
-export function formatDrawActions(actions: DrawAction[]): string {
+export function formatDrawActions(actions: DrawingHistoryAction[]): string {
   if (actions.length === 1) {
     return formatDrawAction(actions[0]);
   }

@@ -8,6 +8,7 @@ import {
   DRAWING_TARGET_STRATEGIES,
   type CanvasObject,
   type DrawAction,
+  type DrawingHistoryAction,
   type DrawingState,
   type SvgBounds,
 } from '../../domain/drawingTypes';
@@ -68,7 +69,7 @@ export interface AiCommandPayload {
 export interface CommandParseResolution {
   ok: boolean;
   source: CommandParseSource;
-  actions: DrawAction[];
+  actions: DrawingHistoryAction[];
   normalizedText: string;
   reason: string;
   elapsedMs: number;
@@ -104,6 +105,7 @@ export interface ResolveCommandContext {
 }
 
 type ModelParserOutput = { actions: DrawAction[] } | { scenePlan: AiScenePlan };
+type LocalFallbackReason = 'explicit-development-preset' | 'offline-edit-command' | 'backend-unavailable';
 
 interface AiScenePlan {
   template: SceneTemplateType;
@@ -360,7 +362,8 @@ export function createAiCommandResolver({
     });
 
     if (!shouldUseAiParser(text, localResult, { forceLocalFallback: context.forceLocalFallback })) {
-      return resolveLocalFallback(text, localResult, normalizedText, 'explicit-development-preset', undefined, payload);
+      const fallbackReason = isOfflineEditCommand(localResult) ? 'offline-edit-command' : 'explicit-development-preset';
+      return resolveLocalFallback(text, localResult, normalizedText, fallbackReason, undefined, payload);
     }
 
     const cacheKey = createCommandCacheKey(normalizedText, canvasRevision, conversationRevision);
@@ -427,7 +430,7 @@ export function shouldUseAiParser(
     return false;
   }
 
-  return !options.forceLocalFallback;
+  return !options.forceLocalFallback && !isOfflineEditCommand(localResult);
 }
 
 export const shouldUseAiFallback = shouldUseAiParser;
@@ -603,7 +606,7 @@ function resolveLocalFallback(
   text: string,
   localResult: LocalCommandParseResult,
   normalizedText: string,
-  reason: 'explicit-development-preset' | 'backend-unavailable',
+  reason: LocalFallbackReason,
   backendError: string | undefined,
   payload: AiCommandPayload,
   elapsedMsValue = 0,
@@ -765,11 +768,11 @@ function createConversationRevision(conversation: CommandConversationItem[]): nu
 }
 
 function isReliableLocalFallback(
-  actions: DrawAction[],
-  reason: 'explicit-development-preset' | 'backend-unavailable',
+  actions: DrawingHistoryAction[],
+  reason: LocalFallbackReason,
   normalizedText: string,
 ): boolean {
-  if (reason === 'explicit-development-preset') {
+  if (reason === 'explicit-development-preset' || reason === 'offline-edit-command') {
     return true;
   }
 
@@ -797,6 +800,10 @@ function isReliableLocalFallback(
     }
 
     if (action.type === 'delete') {
+      return true;
+    }
+
+    if (action.type === 'undo' || action.type === 'redo' || action.type === 'export') {
       return true;
     }
   }
@@ -846,18 +853,18 @@ function getSentContext(_payload: AiCommandPayload): CommandParseResolution['sen
 }
 
 function getLocalFallbackContextSummary(
-  reason: 'explicit-development-preset' | 'backend-unavailable',
+  reason: LocalFallbackReason,
   payload: AiCommandPayload,
 ): string {
-  return reason === 'explicit-development-preset'
+  return reason === 'explicit-development-preset' || reason === 'offline-edit-command'
     ? '开发预置未请求 AI，上下文未发送'
     : summarizePayloadContext(payload);
 }
 
 function getLocalFallbackSentContext(
-  reason: 'explicit-development-preset' | 'backend-unavailable',
+  reason: LocalFallbackReason,
 ): CommandParseResolution['sentContext'] {
-  if (reason === 'explicit-development-preset') {
+  if (reason === 'explicit-development-preset' || reason === 'offline-edit-command') {
     return {
       conversation: false,
       canvas: false,
@@ -875,16 +882,13 @@ function getLocalFallbackSentContext(
 function localSuccess(
   localResult: LocalCommandParseResult & { ok: true },
   normalizedText: string,
-  reason: 'explicit-development-preset' | 'backend-unavailable',
+  reason: LocalFallbackReason,
   backendError: string | undefined,
   payload: AiCommandPayload,
   elapsedMsValue = 0,
 ): CommandParseResolution {
   const actionSummary = formatDrawActions(localResult.actions);
-  const fallbackReason =
-    reason === 'explicit-development-preset'
-      ? '明确的开发预置 action，直接使用 local fallback'
-      : `local fallback：${AI_UNAVAILABLE_FALLBACK_MESSAGE}`;
+  const fallbackReason = getLocalFallbackReasonText(reason);
 
   return {
     ok: true,
@@ -907,7 +911,7 @@ function localSuccess(
 function localFailure(
   localResult: LocalCommandParseResult,
   normalizedText: string,
-  reason: 'explicit-development-preset' | 'backend-unavailable',
+  reason: LocalFallbackReason,
   backendError: string | undefined,
   payload: AiCommandPayload,
   elapsedMsValue = 0,
@@ -934,6 +938,18 @@ function localFailure(
     sentContext: getLocalFallbackSentContext(reason),
     error: [localError, backendError].filter(Boolean).join(' '),
   };
+}
+
+function getLocalFallbackReasonText(reason: LocalFallbackReason): string {
+  if (reason === 'backend-unavailable') {
+    return `local fallback：${AI_UNAVAILABLE_FALLBACK_MESSAGE}`;
+  }
+
+  if (reason === 'offline-edit-command') {
+    return '离线编辑命令，直接使用 local fallback';
+  }
+
+  return '明确的开发预置 action，直接使用 local fallback';
 }
 
 function aiSuccess(
@@ -1046,7 +1062,7 @@ function detectSceneTypeFromLocalReason(reason: string): SceneTemplateType | nul
   return null;
 }
 
-function getSuccessFeedbackText(actions: DrawAction[], reason: string, sceneType: SceneTemplateType | null): string {
+function getSuccessFeedbackText(actions: DrawingHistoryAction[], reason: string, sceneType: SceneTemplateType | null): string {
   if (sceneType) {
     return `已生成${formatSceneType(sceneType)}`;
   }
@@ -1075,6 +1091,18 @@ function getSuccessFeedbackText(actions: DrawAction[], reason: string, sceneType
     return '已清空画布';
   }
 
+  if (actions.length === 1 && actions[0].type === 'undo') {
+    return '已撤销上一步';
+  }
+
+  if (actions.length === 1 && actions[0].type === 'redo') {
+    return '已重做上一步';
+  }
+
+  if (actions.length === 1 && actions[0].type === 'export') {
+    return '正在导出图片';
+  }
+
   if (actions.every((action) => action.type === 'update' || action.type === 'delete')) {
     return '已执行微调';
   }
@@ -1086,6 +1114,17 @@ function getSuccessFeedbackText(actions: DrawAction[], reason: string, sceneType
   }
 
   return '已执行绘图指令';
+}
+
+function isOfflineEditCommand(localResult: LocalCommandParseResult): boolean {
+  return (
+    localResult.ok &&
+    localResult.actions.length === 1 &&
+    (localResult.actions[0].type === 'clear' ||
+      localResult.actions[0].type === 'undo' ||
+      localResult.actions[0].type === 'redo' ||
+      localResult.actions[0].type === 'export')
+  );
 }
 
 function formatSceneType(sceneType: SceneTemplateType): string {

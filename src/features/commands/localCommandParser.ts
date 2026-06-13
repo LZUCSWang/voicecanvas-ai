@@ -1,5 +1,6 @@
 import type {
   DrawAction,
+  DrawingHistoryAction,
   DrawingObjectType,
   DrawingPosition,
   DrawingSize,
@@ -12,7 +13,7 @@ export type LocalCommandSource = 'local';
 
 export interface LocalCommandParseBase {
   source: LocalCommandSource;
-  actions: DrawAction[];
+  actions: DrawingHistoryAction[];
   normalizedText: string;
   segments: string[];
   reason: string;
@@ -66,7 +67,7 @@ const FINE_TUNE_SCALE_STEP = 1.15;
 const FINE_TUNE_SMALL_SCALE_STEP = 0.88;
 
 interface ParsedCommandSegment {
-  actions: DrawAction[];
+  actions: DrawingHistoryAction[];
   reason: string;
 }
 
@@ -160,11 +161,27 @@ function parseCommandSegment(segment: string): (ParsedCommandSegment & { ok: tru
   }
 
   if (segment.includes('导出')) {
-    return failure(segment, [segment], '当前版本尚未接入导出动作', '已识别为导出图片，但当前 PR 还未实现导出。');
+    return {
+      ok: true,
+      actions: [{ type: 'export', format: 'png' }],
+      reason: '导出图片',
+    };
   }
 
   if (segment.includes('撤销')) {
-    return failure(segment, [segment], '当前版本尚未接入撤销动作', '已识别为撤销，但当前 PR 还未实现撤销历史。');
+    return {
+      ok: true,
+      actions: [{ type: 'undo' }],
+      reason: '撤销上一步',
+    };
+  }
+
+  if (segment.includes('重做')) {
+    return {
+      ok: true,
+      actions: [{ type: 'redo' }],
+      reason: '重做上一步',
+    };
   }
 
   const fineTuneAction = parseFineTuneCommand(segment);
