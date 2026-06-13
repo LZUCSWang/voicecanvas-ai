@@ -39,7 +39,7 @@ export function createParserApp(configOverrides: Partial<ParserConfig> = {}) {
       return context.json(response.body, response.status);
     }
 
-    const response = await parseModelScopeCommand(parsedRequest.data.text, config);
+    const response = await parseModelScopeCommand(parsedRequest.data, config);
     return context.json(response.body, response.status);
   });
 
