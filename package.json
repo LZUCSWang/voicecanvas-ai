@@ -5,18 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "tsx src/server/index.ts",
     "build": "tsc && vite build",
     "test": "vitest",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.4",
+    "dotenv": "^17.4.2",
+    "hono": "^4.12.25",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^25.9.3",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.3",
     "vite": "^7.1.2",
     "vitest": "^3.2.4"
