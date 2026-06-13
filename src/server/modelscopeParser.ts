@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import {
+  coerceModelParserOutput,
   modelParserOutputSchema,
   tokenUsageSchema,
   type ModelParserOutput,
+  type ParseCommandRequest,
   type TokenUsage,
 } from './modelscopeSchemas';
 
 export const MODELSCOPE_CHAT_COMPLETIONS_URL = 'https://api-inference.modelscope.cn/v1/chat/completions';
 export const DEFAULT_MODELSCOPE_MODEL = 'deepseek-ai/DeepSeek-V3.2';
+export const DEFAULT_MODELSCOPE_MAX_TOKENS = 900;
 export const DEFAULT_MODELSCOPE_FALLBACK_MODELS = [
   'deepseek-ai/DeepSeek-V4-Flash',
   'Qwen/Qwen3-235B-A22B-Instruct-2507',
@@ -21,18 +24,27 @@ export const DEFAULT_MODELSCOPE_FALLBACK_MODELS = [
 export const MODELSCOPE_SYSTEM_PROMPT = [
   'You are the server-side command parser for VoiceCanvas AI.',
   'Return only valid JSON. Do not return Markdown, code fences, comments, or explanatory text.',
+  'Keep JSON compact. Do not include duplicate or explanatory items.',
+  'For scenePlan, return at most 6 concise items. For actions, return at most 6 safe actions unless the user explicitly asks for more.',
   'The response must match exactly one of these shapes:',
   '{"actions":[DrawAction,...]}',
   '{"scenePlan":{"template":"flowchart|mind-map|comparison|architecture|poster","title":"...","items":["..."]}}',
   'For complex natural language, high-level diagrams, posters, comparisons, architecture diagrams, or vague layout requests, prefer scenePlan instead of inventing uncontrolled coordinates.',
   'Use actions only for safe direct edits such as creating simple objects, clearing the canvas, deleting a selected object, or fine-tuning an existing object.',
   'DrawAction supports create, update, delete, and clear.',
-  'create fields: objectType circle|rectangle|triangle|line|arrow|text, color, position, size, text, style, customBounds, customLine.',
+  'create fields: objectType circle|rectangle|triangle|line|arrow|text, color, position, size, text, style, customBounds, customLine, customGeometry.',
   'update fields: targetId or target selector, plus changes.',
   'target selector fields: id, objectType, color, position, textIncludes, strategy latest|first|last.',
-  'changes fields: color, position, size, text, translate {dx,dy}, scale, resize {dw,dh}, strokeWidthDelta, strokeStyle solid|dashed, fillOpacityDelta, layer front|back|forward|backward.',
+  'changes fields: color, position, size, text, translate {dx,dy}, scale, resize {dw,dh}, geometry, style, strokeWidthDelta, strokeStyle solid|dashed, fillOpacityDelta, layer front|back|forward|backward.',
+  'Prefer customGeometry when the user asks for precise size, start/end points, bends, curved arrows, rounded rectangle radii, or hand-tuned layout details.',
+  'customGeometry supports circle {kind:"circle",cx,cy,radius}, rectangle {kind:"rectangle",x,y,width,height,rx,ry}, line/arrow {kind:"line"|"arrow",start,end}, polyline {kind:"polyline",points:[{x,y},...]}, and curve {kind:"curve",start,control1,control2,end}.',
+  'style supports absolute visual details: strokeWidth, fillOpacity, cornerRadius, cornerRadiusX, cornerRadiusY, arrowHeadSize, lineCap, lineJoin, dashArray.',
+  'For update/delete, never put objectType, color, position, or textIncludes at the action root. Put them under target.',
+  'For relative style edits you may use strokeWidthDelta, strokeStyle, and fillOpacityDelta. For precise absolute values, use changes.style.',
+  'When the user mentions text, labels, quoted content, or "包含...", target text with textIncludes. If they ask to bring the corresponding rectangle to front, target rectangle separately. Do not edit arrows or lines unless the user explicitly mentions connectors.',
   'delete supports targetId or target selector. If the user says "the arrow" or "recent rectangle", use target with strategy "latest".',
   'For small relative edits like "move the arrow right a little", return a safe update action such as translate {dx:24,dy:0}.',
+  'Example for "polish the arrow, blue rectangle, and draft text": {"actions":[{"type":"update","target":{"objectType":"arrow","strategy":"latest"},"changes":{"strokeWidthDelta":1}},{"type":"update","target":{"objectType":"rectangle","color":"#2563eb","strategy":"latest"},"changes":{"strokeWidthDelta":1,"fillOpacityDelta":0.05}},{"type":"delete","target":{"objectType":"text","textIncludes":"草稿","strategy":"latest"}}]}',
 ].join('\n');
 
 export interface ParserConfig {
@@ -128,10 +140,11 @@ export function createParserConfig(overrides: Partial<ParserConfig> = {}): Parse
   };
 }
 
-export async function parseModelScopeCommand(text: string, config: ParserConfig): Promise<ParserResponse> {
+export async function parseModelScopeCommand(request: string | ParseCommandRequest, config: ParserConfig): Promise<ParserResponse> {
   const startedAt = config.now();
   const modelCandidates = createModelCandidates(config);
   const defaultModel = modelCandidates[0] ?? DEFAULT_MODELSCOPE_MODEL;
+  const commandRequest = typeof request === 'string' ? { text: request } : request;
 
   if (!config.apiToken) {
     return errorResponse(
@@ -149,7 +162,7 @@ export async function parseModelScopeCommand(text: string, config: ParserConfig)
 
   for (const model of modelCandidates) {
     attemptedModels.push(model);
-    const attempt = await parseModelScopeCommandWithModel(text, model, config);
+    const attempt = await parseModelScopeCommandWithModel(commandRequest, model, config);
 
     if (attempt.ok) {
       const body: ParserSuccessBody = {
@@ -188,7 +201,7 @@ export async function parseModelScopeCommand(text: string, config: ParserConfig)
 }
 
 async function parseModelScopeCommandWithModel(
-  text: string,
+  request: ParseCommandRequest,
   model: string,
   config: ParserConfig,
 ): Promise<
@@ -212,9 +225,10 @@ async function parseModelScopeCommandWithModel(
         model,
         messages: [
           { role: 'system', content: MODELSCOPE_SYSTEM_PROMPT },
-          { role: 'user', content: text },
+          { role: 'user', content: formatUserPrompt(request) },
         ],
         temperature: 0.1,
+        max_tokens: DEFAULT_MODELSCOPE_MAX_TOKENS,
         response_format: { type: 'json_object' },
       }),
     });
@@ -282,7 +296,8 @@ async function parseModelScopeCommandWithModel(
     };
   }
 
-  const modelOutput = modelParserOutputSchema.safeParse(parsedContent);
+  const coercedContent = coerceModelParserOutput(parsedContent);
+  const modelOutput = modelParserOutputSchema.safeParse(coercedContent);
 
   if (!modelOutput.success) {
     return {
@@ -300,6 +315,17 @@ async function parseModelScopeCommandWithModel(
     result: modelOutput.data as ModelParserOutput,
     usage,
   };
+}
+
+function formatUserPrompt(request: ParseCommandRequest): string {
+  return JSON.stringify(
+    {
+      text: request.text,
+      conversation: request.conversation ?? [],
+      canvas: request.canvas ?? { objects: [] },
+      recentActions: request.recentActions ?? [],
+    },
+  );
 }
 
 export function errorResponse(

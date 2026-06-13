@@ -197,6 +197,226 @@ describe('drawing action executor', () => {
     });
   });
 
+  it('lets AI create precise freeform geometry instead of relying on preset positions and sizes', () => {
+    const actions: DrawAction[] = [
+      {
+        type: 'create',
+        objectType: 'circle',
+        color: '#2563eb',
+        customGeometry: {
+          kind: 'circle',
+          cx: 180,
+          cy: 150,
+          radius: 37,
+        },
+      },
+      {
+        type: 'create',
+        objectType: 'rectangle',
+        color: '#7c3aed',
+        customGeometry: {
+          kind: 'rectangle',
+          x: 260,
+          y: 96,
+          width: 188,
+          height: 72,
+          rx: 18,
+          ry: 12,
+        },
+      },
+      {
+        type: 'create',
+        objectType: 'arrow',
+        color: '#e11d48',
+        customGeometry: {
+          kind: 'polyline',
+          points: [
+            { x: 448, y: 132 },
+            { x: 510, y: 132 },
+            { x: 510, y: 210 },
+            { x: 610, y: 210 },
+          ],
+        },
+      },
+      {
+        type: 'create',
+        objectType: 'line',
+        color: '#0f766e',
+        customGeometry: {
+          kind: 'curve',
+          start: { x: 120, y: 270 },
+          control1: { x: 220, y: 210 },
+          control2: { x: 340, y: 330 },
+          end: { x: 460, y: 270 },
+        },
+      },
+    ];
+
+    const state = actions.reduce(executeDrawingAction, createInitialDrawingState());
+
+    expect(state.objects[0]).toMatchObject({
+      type: 'circle',
+      bounds: { x: 143, y: 113, width: 74, height: 74 },
+      geometry: { kind: 'circle', cx: 180, cy: 150, radius: 37 },
+    });
+    expect(state.objects[1]).toMatchObject({
+      type: 'rectangle',
+      bounds: { x: 260, y: 96, width: 188, height: 72 },
+      geometry: { kind: 'rectangle', x: 260, y: 96, width: 188, height: 72, rx: 18, ry: 12 },
+    });
+    expect(state.objects[2]).toMatchObject({
+      type: 'arrow',
+      bounds: { x: 448, y: 132, width: 162, height: 78 },
+      geometry: {
+        kind: 'polyline',
+        points: [
+          { x: 448, y: 132 },
+          { x: 510, y: 132 },
+          { x: 510, y: 210 },
+          { x: 610, y: 210 },
+        ],
+      },
+    });
+    expect(state.objects[3]).toMatchObject({
+      type: 'line',
+      bounds: { x: 120, y: 210, width: 340, height: 120 },
+      geometry: {
+        kind: 'curve',
+        start: { x: 120, y: 270 },
+        control1: { x: 220, y: 210 },
+        control2: { x: 340, y: 330 },
+        end: { x: 460, y: 270 },
+      },
+    });
+  });
+
+  it('updates precise geometry and style details from AI actions', () => {
+    const initialState = [
+      {
+        type: 'create',
+        objectType: 'rectangle',
+        color: '#2563eb',
+        customGeometry: { kind: 'rectangle', x: 120, y: 110, width: 140, height: 64, rx: 8 },
+        style: { strokeWidth: 3, fillOpacity: 0.2 },
+      } satisfies DrawAction,
+      {
+        type: 'create',
+        objectType: 'arrow',
+        color: '#e11d48',
+        customGeometry: {
+          kind: 'curve',
+          start: { x: 280, y: 142 },
+          control1: { x: 340, y: 90 },
+          control2: { x: 420, y: 190 },
+          end: { x: 500, y: 142 },
+        },
+        style: { arrowHeadSize: 10 },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const updatedRectangle = executeDrawingActionWithResult(initialState, {
+      type: 'update',
+      target: { objectType: 'rectangle' },
+      changes: {
+        geometry: { kind: 'rectangle', x: 118, y: 106, width: 168, height: 82, rx: 24, ry: 18 },
+        style: { strokeWidth: 5, fillOpacity: 0.32 },
+      },
+    }).state;
+    const updatedArrow = executeDrawingActionWithResult(updatedRectangle, {
+      type: 'update',
+      target: { objectType: 'arrow' },
+      changes: {
+        geometry: {
+          kind: 'polyline',
+          points: [
+            { x: 290, y: 150 },
+            { x: 360, y: 88 },
+            { x: 455, y: 190 },
+            { x: 540, y: 150 },
+          ],
+        },
+        style: { arrowHeadSize: 16, strokeWidth: 6 },
+      },
+    }).state;
+
+    expect(updatedArrow.objects[0]).toMatchObject({
+      bounds: { x: 118, y: 106, width: 168, height: 82 },
+      geometry: { kind: 'rectangle', rx: 24, ry: 18 },
+      style: { strokeWidth: 5, fillOpacity: 0.32 },
+    });
+    expect(updatedArrow.objects[1]).toMatchObject({
+      bounds: { x: 290, y: 88, width: 250, height: 102 },
+      geometry: {
+        kind: 'polyline',
+        points: [
+          { x: 290, y: 150 },
+          { x: 360, y: 88 },
+          { x: 455, y: 190 },
+          { x: 540, y: 150 },
+        ],
+      },
+      style: { arrowHeadSize: 16, strokeWidth: 6 },
+    });
+  });
+
+  it('translates and scales AI-controlled polylines and curves without collapsing them to straight lines', () => {
+    const initialState = [
+      {
+        type: 'create',
+        objectType: 'arrow',
+        color: '#e11d48',
+        customGeometry: {
+          kind: 'polyline',
+          points: [
+            { x: 100, y: 100 },
+            { x: 160, y: 60 },
+            { x: 240, y: 140 },
+          ],
+        },
+      } satisfies DrawAction,
+      {
+        type: 'create',
+        objectType: 'line',
+        color: '#0f766e',
+        customGeometry: {
+          kind: 'curve',
+          start: { x: 300, y: 220 },
+          control1: { x: 350, y: 160 },
+          control2: { x: 430, y: 280 },
+          end: { x: 500, y: 220 },
+        },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const moved = executeDrawingActionWithResult(initialState, {
+      type: 'update',
+      target: { objectType: 'arrow' },
+      changes: { translate: { dx: 20, dy: 10 } },
+    }).state;
+    const scaled = executeDrawingActionWithResult(moved, {
+      type: 'update',
+      target: { objectType: 'line' },
+      changes: { scale: 1.2 },
+    }).state;
+
+    expect(scaled.objects[0].geometry).toEqual({
+      kind: 'polyline',
+      points: [
+        { x: 120, y: 110 },
+        { x: 180, y: 70 },
+        { x: 260, y: 150 },
+      ],
+    });
+    expect(scaled.objects[0].bounds).toEqual({ x: 120, y: 70, width: 140, height: 80 });
+    expect(scaled.objects[1].geometry).toEqual({
+      kind: 'curve',
+      start: { x: 280, y: 220 },
+      control1: { x: 340, y: 148 },
+      control2: { x: 436, y: 292 },
+      end: { x: 520, y: 220 },
+    });
+  });
+
   it('resolves target selectors by id, type, color, position, text, and strategy', () => {
     const actions: DrawAction[] = [
       { type: 'create', objectType: 'rectangle', color: '#2563eb', position: 'top-left', size: 'medium' },

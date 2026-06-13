@@ -120,6 +120,10 @@ function createComparisonActions(title: string, items: string[]): DrawAction[] {
 }
 
 function createArchitectureActions(title: string, items: string[]): DrawAction[] {
+  if (isTransformerArchitecture(title, items)) {
+    return createTransformerArchitectureActions(title, items);
+  }
+
   const modules = normalizeItems(items, ['Speech Input', 'Local Parser', 'Scene Templates', 'SVG Canvas'], 5);
   const actions: DrawAction[] = [
     text(title, { x: 140, y: 30, width: 520, height: 44 }, 'medium', INK),
@@ -142,6 +146,108 @@ function createArchitectureActions(title: string, items: string[]): DrawAction[]
   actions.push(text('data flow', { x: 606, y: 238, width: 95, height: 42 }, 'small', PURPLE));
 
   return actions;
+}
+
+function createTransformerArchitectureActions(title: string, items: string[]): DrawAction[] {
+  const labels = normalizeTransformerLabels(items);
+  const moduleBounds = [
+    { x: 268, y: 82, width: 264, height: 42 },
+    { x: 268, y: 142, width: 264, height: 42 },
+    { x: 268, y: 202, width: 264, height: 42 },
+    { x: 268, y: 262, width: 264, height: 42 },
+    { x: 268, y: 322, width: 264, height: 42 },
+    { x: 268, y: 382, width: 264, height: 42 },
+  ];
+  const colors = [BLUE, TEAL, PURPLE, SLATE, AMBER, TEAL];
+  const actions: DrawAction[] = [
+    text(title, { x: 132, y: 24, width: 536, height: 38 }, 'medium', INK),
+    rect({ x: 232, y: 70, width: 336, height: 366 }, '#e2e8f0'),
+    text('Encoder block', { x: 590, y: 354, width: 104, height: 30 }, 'small', MUTED),
+    line({ x: 568, y: 92 }, { x: 568, y: 420 }, MUTED),
+    arrow({ x: 400, y: 62 }, { x: 400, y: 77 }, ROSE),
+  ];
+
+  moduleBounds.forEach((bounds, index) => {
+    actions.push(rect(bounds, colors[index]));
+    actions.push(text(labels[index], { x: bounds.x + 10, y: bounds.y + 8, width: bounds.width - 20, height: bounds.height - 16 }, 'small', INK));
+
+    if (index < moduleBounds.length - 1) {
+      actions.push(arrow({ x: 400, y: bounds.y + bounds.height + 5 }, { x: 400, y: moduleBounds[index + 1].y - 5 }, ROSE));
+    }
+  });
+
+  actions.push(line({ x: 174, y: 163 }, { x: 260, y: 163 }, AMBER));
+  actions.push(text('tokens + position', { x: 68, y: 142, width: 104, height: 42 }, 'small', MUTED));
+  actions.push(line({ x: 540, y: 223 }, { x: 646, y: 223 }, AMBER));
+  actions.push(text('attention weights', { x: 656, y: 210, width: 88, height: 28 }, 'small', MUTED));
+
+  return actions;
+}
+
+function isTransformerArchitecture(title: string, items: string[]): boolean {
+  const haystack = `${title} ${items.join(' ')}`.toLowerCase();
+
+  return ['transformer', 'attention', 'self-attention', 'embedding', 'positional', 'feed-forward', 'ffn', '编码器'].some((keyword) =>
+    haystack.includes(keyword),
+  );
+}
+
+function normalizeTransformerLabels(items: string[]): string[] {
+  const haystack = items.join(' ');
+  const input = findLabel(items, ['输入', 'input', 'token']) ?? 'Input Embedding';
+  const position = findLabel(items, ['位置', 'position']) ?? 'Positional Encoding';
+  const attention = findLabel(items, ['注意力', 'attention']) ?? 'Multi-Head Self-Attention';
+  const ffn = findLabel(items, ['前馈', 'feed', 'ffn']) ?? 'Feed Forward Network';
+  const output = findLabel(items, ['输出', 'output']) ?? 'Output Representation';
+
+  return [
+    normalizeTransformerLabel(input, 'Input Embedding'),
+    normalizeTransformerLabel(position, 'Positional Encoding'),
+    normalizeTransformerLabel(attention, 'Multi-Head Self-Attention'),
+    haystack.includes('norm') || haystack.includes('归一') ? 'Add & Norm' : 'Add & Norm',
+    normalizeTransformerLabel(ffn, 'Feed Forward Network'),
+    normalizeTransformerLabel(output, 'Output Representation'),
+  ];
+}
+
+function findLabel(items: string[], keywords: string[]): string | null {
+  return items.find((item) => keywords.some((keyword) => item.toLowerCase().includes(keyword))) ?? null;
+}
+
+function normalizeTransformerLabel(label: string, fallback: string): string {
+  const normalized = label.toLowerCase();
+
+  if (normalized.includes('feed') || normalized.includes('ffn') || label.includes('前馈')) {
+    return 'Feed Forward Network';
+  }
+
+  if (normalized.includes('self-attention') || normalized.includes('attention') || label.includes('注意力')) {
+    return 'Multi-Head Self-Attention';
+  }
+
+  if (normalized.includes('position') || label.includes('位置')) {
+    return 'Positional Encoding';
+  }
+
+  if (normalized.includes('embedding') || label.includes('嵌入')) {
+    return 'Input Embedding';
+  }
+
+  if (normalized.includes('output') || label.includes('输出')) {
+    return 'Output Representation';
+  }
+
+  const match = label.match(/\(([^)]+)\)/);
+
+  if (match?.[1]) {
+    return match[1].trim();
+  }
+
+  if (/[\u4e00-\u9fff]/.test(label)) {
+    return fallback;
+  }
+
+  return label.trim() || fallback;
 }
 
 function createPosterActions(title: string, items: string[]): DrawAction[] {

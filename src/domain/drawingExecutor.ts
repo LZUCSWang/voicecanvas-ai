@@ -11,6 +11,7 @@ import type {
   DrawingSize,
   DrawingState,
   DrawingTargetSelector,
+  FreeformDrawingGeometry,
   SvgBounds,
   SvgPoint,
   UpdateDrawingAction,
@@ -24,6 +25,9 @@ const DEFAULT_TEXT_VALUE = 'Text';
 const MIN_OBJECT_SIDE = 12;
 const MIN_STROKE_WIDTH = 1;
 const MAX_STROKE_WIDTH = 24;
+const MIN_ARROW_HEAD_SIZE = 4;
+const MAX_ARROW_HEAD_SIZE = 32;
+const MAX_CORNER_RADIUS = 80;
 const DEFAULT_TRANSLATE_STEP = 24;
 
 const DEFAULT_FILL_OPACITY: Record<DrawingObjectType, number> = {
@@ -82,6 +86,7 @@ function createObject(state: DrawingState, action: CreateDrawingAction): Drawing
     style: action.style,
     customBounds: action.customBounds,
     customLine: action.customLine,
+    customGeometry: action.customGeometry,
     state,
   });
 
@@ -253,6 +258,10 @@ function applyObjectChanges(object: CanvasObject, changes: UpdateDrawingChanges,
     nextObject = resizeObject(nextObject, changes.resize.dw, changes.resize.dh);
   }
 
+  if (changes.geometry) {
+    nextObject = applyGeometryChange(nextObject, changes.geometry);
+  }
+
   return applyStyleChanges(nextObject, changes);
 }
 
@@ -302,6 +311,33 @@ function translateObject(object: CanvasObject, dx: number, dy: number): CanvasOb
           start,
           end,
         },
+      };
+    }
+    case 'polyline': {
+      const points = object.geometry.points.map((point) => translatePoint(point, dx, dy));
+
+      return {
+        ...object,
+        bounds: getBoundsForPoints(points),
+        geometry: {
+          ...object.geometry,
+          points,
+        },
+      };
+    }
+    case 'curve': {
+      const geometry = {
+        ...object.geometry,
+        start: translatePoint(object.geometry.start, dx, dy),
+        control1: translatePoint(object.geometry.control1, dx, dy),
+        control2: translatePoint(object.geometry.control2, dx, dy),
+        end: translatePoint(object.geometry.end, dx, dy),
+      };
+
+      return {
+        ...object,
+        bounds: getBoundsForGeometry(geometry),
+        geometry,
       };
     }
     case 'text':
@@ -370,6 +406,33 @@ function scaleObject(object: CanvasObject, scale: number): CanvasObject {
         },
       };
     }
+    case 'polyline': {
+      const points = object.geometry.points.map((point) => scalePoint(point, center, factor));
+
+      return {
+        ...object,
+        bounds: getBoundsForPoints(points),
+        geometry: {
+          ...object.geometry,
+          points,
+        },
+      };
+    }
+    case 'curve': {
+      const geometry = {
+        ...object.geometry,
+        start: scalePoint(object.geometry.start, center, factor),
+        control1: scalePoint(object.geometry.control1, center, factor),
+        control2: scalePoint(object.geometry.control2, center, factor),
+        end: scalePoint(object.geometry.end, center, factor),
+      };
+
+      return {
+        ...object,
+        bounds: getBoundsForGeometry(geometry),
+        geometry,
+      };
+    }
     case 'text':
       return {
         ...object,
@@ -404,6 +467,9 @@ function resizeObject(object: CanvasObject, dw: number, dh: number): CanvasObjec
         },
       };
     }
+    case 'polyline':
+    case 'curve':
+      return scaleObject(object, getResizeScaleFactor(object.bounds, dw, dh));
     case 'text': {
       const bounds = resizeBounds(object.bounds, dw, dh);
       const widthRatio = object.bounds.width > 0 ? bounds.width / object.bounds.width : 1;
@@ -431,16 +497,28 @@ function resizeObject(object: CanvasObject, dw: number, dh: number): CanvasObjec
   }
 }
 
+function getResizeScaleFactor(bounds: SvgBounds, dw: number, dh: number): number {
+  const widthRatio = bounds.width > 0 ? Math.max(MIN_OBJECT_SIDE, bounds.width + dw) / bounds.width : 1;
+  const heightRatio = bounds.height > 0 ? Math.max(MIN_OBJECT_SIDE, bounds.height + dh) / bounds.height : 1;
+
+  return Math.max(widthRatio, heightRatio);
+}
+
 function applyStyleChanges(object: CanvasObject, changes: UpdateDrawingChanges): CanvasObject {
   if (
     typeof changes.strokeWidthDelta !== 'number' &&
     !changes.strokeStyle &&
-    typeof changes.fillOpacityDelta !== 'number'
+    typeof changes.fillOpacityDelta !== 'number' &&
+    !changes.style
   ) {
     return object;
   }
 
   const style: CanvasObjectStyle = { ...(object.style ?? {}) };
+
+  if (changes.style) {
+    Object.assign(style, normalizeStyleForObject(changes.style, object));
+  }
 
   if (typeof changes.strokeWidthDelta === 'number') {
     const baseStrokeWidth = style.strokeWidth ?? getDrawingSizeSpec(object.size).strokeWidth;
@@ -459,6 +537,20 @@ function applyStyleChanges(object: CanvasObject, changes: UpdateDrawingChanges):
   return {
     ...object,
     style,
+  };
+}
+
+function applyGeometryChange(object: CanvasObject, geometry: FreeformDrawingGeometry): CanvasObject {
+  const normalizedGeometry = normalizeFreeformGeometry(object.type, geometry);
+
+  if (!normalizedGeometry) {
+    return object;
+  }
+
+  return {
+    ...object,
+    bounds: getBoundsForGeometry(normalizedGeometry),
+    geometry: normalizedGeometry,
   };
 }
 
@@ -508,9 +600,12 @@ function buildCanvasObject(input: {
     start: SvgPoint;
     end: SvgPoint;
   };
+  customGeometry?: FreeformDrawingGeometry;
   state: DrawingState;
 }): CanvasObject {
+  const freeformGeometry = input.customGeometry ? normalizeFreeformGeometry(input.type, input.customGeometry) : null;
   const bounds =
+    freeformGeometry ? getBoundsForGeometry(freeformGeometry) :
     input.customBounds ?? getBoundsForLine(input.customLine) ?? getBoundsForPosition(input.position, input.size, input.state.canvas);
   const object: CanvasObject = {
     id: input.id,
@@ -519,7 +614,7 @@ function buildCanvasObject(input: {
     position: input.position,
     size: input.size,
     bounds,
-    geometry: createGeometry(input.type, bounds, input.size, input.customLine),
+    geometry: freeformGeometry ?? createGeometry(input.type, bounds, input.size, input.customLine),
   };
 
   if (input.style) {
@@ -549,6 +644,103 @@ function getBoundsForLine(line?: { start: SvgPoint; end: SvgPoint }): SvgBounds 
     width: roundNumber(Math.abs(line.end.x - line.start.x)),
     height: roundNumber(Math.abs(line.end.y - line.start.y)),
   };
+}
+
+function getBoundsForGeometry(geometry: DrawingGeometry): SvgBounds {
+  switch (geometry.kind) {
+    case 'circle':
+      return {
+        x: roundNumber(geometry.cx - geometry.radius),
+        y: roundNumber(geometry.cy - geometry.radius),
+        width: roundNumber(geometry.radius * 2),
+        height: roundNumber(geometry.radius * 2),
+      };
+    case 'rectangle':
+      return {
+        x: geometry.x,
+        y: geometry.y,
+        width: geometry.width,
+        height: geometry.height,
+      };
+    case 'triangle':
+      return getBoundsForPoints(geometry.points);
+    case 'line':
+    case 'arrow':
+      return getBoundsForLine({ start: geometry.start, end: geometry.end });
+    case 'polyline':
+      return getBoundsForPoints(geometry.points);
+    case 'curve':
+      return getBoundsForPoints([geometry.start, geometry.control1, geometry.control2, geometry.end]);
+    case 'text':
+      return {
+        x: roundNumber(geometry.anchor.x),
+        y: roundNumber(geometry.anchor.y),
+        width: 0,
+        height: 0,
+      };
+  }
+}
+
+function normalizeFreeformGeometry(objectType: DrawingObjectType, geometry: FreeformDrawingGeometry): DrawingGeometry | null {
+  switch (geometry.kind) {
+    case 'circle':
+      if (objectType !== 'circle') {
+        return null;
+      }
+
+      return {
+        kind: 'circle',
+        cx: roundNumber(geometry.cx),
+        cy: roundNumber(geometry.cy),
+        radius: roundNumber(Math.max(MIN_OBJECT_SIDE / 2, geometry.radius)),
+      };
+    case 'rectangle':
+      if (objectType !== 'rectangle') {
+        return null;
+      }
+
+      return {
+        kind: 'rectangle',
+        x: roundNumber(geometry.x),
+        y: roundNumber(geometry.y),
+        width: roundNumber(Math.max(MIN_OBJECT_SIDE, geometry.width)),
+        height: roundNumber(Math.max(MIN_OBJECT_SIDE, geometry.height)),
+        rx: geometry.rx === undefined ? undefined : roundNumber(clamp(geometry.rx, 0, MAX_CORNER_RADIUS)),
+        ry: geometry.ry === undefined ? undefined : roundNumber(clamp(geometry.ry, 0, MAX_CORNER_RADIUS)),
+      };
+    case 'line':
+    case 'arrow':
+      if (objectType !== 'line' && objectType !== 'arrow') {
+        return null;
+      }
+
+      return {
+        kind: objectType,
+        start: roundPoint(geometry.start),
+        end: roundPoint(geometry.end),
+      };
+    case 'polyline':
+      if (objectType !== 'line' && objectType !== 'arrow' || geometry.points.length < 2) {
+        return null;
+      }
+
+      return {
+        kind: 'polyline',
+        points: geometry.points.map(roundPoint),
+      };
+    case 'curve':
+      if (objectType !== 'line' && objectType !== 'arrow') {
+        return null;
+      }
+
+      return {
+        kind: 'curve',
+        start: roundPoint(geometry.start),
+        control1: roundPoint(geometry.control1),
+        control2: roundPoint(geometry.control2),
+        end: roundPoint(geometry.end),
+      };
+  }
 }
 
 function createGeometry(
@@ -623,6 +815,13 @@ function translatePoint(point: SvgPoint, dx: number, dy: number): SvgPoint {
   };
 }
 
+function roundPoint(point: SvgPoint): SvgPoint {
+  return {
+    x: roundNumber(point.x),
+    y: roundNumber(point.y),
+  };
+}
+
 function translateBounds(bounds: SvgBounds, dx: number, dy: number): SvgBounds {
   return {
     ...bounds,
@@ -683,6 +882,62 @@ function getBoundsForPoints(points: SvgPoint[]): SvgBounds {
     width: roundNumber(Math.max(...xs) - x),
     height: roundNumber(Math.max(...ys) - y),
   };
+}
+
+function normalizeStyleForObject(style: CanvasObjectStyle, object: CanvasObject): CanvasObjectStyle {
+  const normalized: CanvasObjectStyle = {};
+
+  if (typeof style.strokeWidth === 'number') {
+    normalized.strokeWidth = roundNumber(clamp(style.strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH));
+  }
+
+  if (style.strokeStyle) {
+    normalized.strokeStyle = style.strokeStyle;
+  }
+
+  if (typeof style.fillOpacity === 'number') {
+    normalized.fillOpacity = roundNumber(clamp(style.fillOpacity, 0, 1));
+  }
+
+  if (typeof style.cornerRadius === 'number') {
+    normalized.cornerRadius = roundNumber(clamp(style.cornerRadius, 0, MAX_CORNER_RADIUS));
+  }
+
+  if (typeof style.cornerRadiusX === 'number') {
+    normalized.cornerRadiusX = roundNumber(clamp(style.cornerRadiusX, 0, MAX_CORNER_RADIUS));
+  }
+
+  if (typeof style.cornerRadiusY === 'number') {
+    normalized.cornerRadiusY = roundNumber(clamp(style.cornerRadiusY, 0, MAX_CORNER_RADIUS));
+  }
+
+  if (typeof style.arrowHeadSize === 'number') {
+    normalized.arrowHeadSize = roundNumber(clamp(style.arrowHeadSize, MIN_ARROW_HEAD_SIZE, MAX_ARROW_HEAD_SIZE));
+  }
+
+  if (style.lineCap) {
+    normalized.lineCap = style.lineCap;
+  }
+
+  if (style.lineJoin) {
+    normalized.lineJoin = style.lineJoin;
+  }
+
+  if (style.dashArray) {
+    normalized.dashArray = style.dashArray;
+  }
+
+  if (object.type !== 'rectangle') {
+    delete normalized.cornerRadius;
+    delete normalized.cornerRadiusX;
+    delete normalized.cornerRadiusY;
+  }
+
+  if (object.type !== 'arrow') {
+    delete normalized.arrowHeadSize;
+  }
+
+  return normalized;
 }
 
 function describeResolvedTarget(object: CanvasObject, targetId?: string, target?: DrawingTargetSelector): string {

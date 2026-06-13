@@ -78,6 +78,47 @@ describe('scene templates', () => {
     expect(getTextValues(actions)).toEqual(expect.arrayContaining(['VoiceCanvas Architecture', 'Speech Input', 'SVG Canvas']));
   });
 
+  it('builds a transformer encoder architecture with attention, add norm, feed forward, and vertical flow', () => {
+    const actions = createSceneTemplateActions({
+      type: 'architecture',
+      title: 'Transformer Encoder',
+      items: [
+        '输入嵌入 (Input Embedding)',
+        '位置编码 (Positional Encoding)',
+        '多头自注意力 (Multi-Head Self-Attention)',
+        '前馈神经网络 (Feed-Forward Neural Network)',
+        '输出表示 (Output Representation)',
+      ],
+    });
+    const labels = getTextValues(actions);
+    const rectangles = actions.filter((action) => action.type === 'create' && action.objectType === 'rectangle');
+    const arrows = actions.filter((action) => action.type === 'create' && action.objectType === 'arrow');
+
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'Transformer Encoder',
+        'Input Embedding',
+        'Positional Encoding',
+        'Multi-Head Self-Attention',
+        'Add & Norm',
+        'Feed Forward Network',
+        'Output Representation',
+      ]),
+    );
+    expect(labels).not.toContain('Layer 1');
+    expect(rectangles.length).toBeGreaterThanOrEqual(7);
+    expect(arrows.length).toBeGreaterThanOrEqual(6);
+    expect(arrows.every((action) => action.type === 'create' && action.customLine && action.customLine.end.y > action.customLine.start.y)).toBe(true);
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        type: 'create',
+        objectType: 'text',
+        text: 'attention weights',
+        customBounds: { x: 656, y: 210, width: 88, height: 28 },
+      }),
+    );
+  });
+
   it('builds a poster with title, emphasis text, and supporting visual elements', () => {
     const actions = createSceneTemplateActions({
       type: 'poster',
