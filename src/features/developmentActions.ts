@@ -1,4 +1,5 @@
 import type { DrawAction } from '../domain/drawingTypes';
+import { parseLocalCommand } from './commands/localCommandParser';
 import { createSceneTemplateActions } from './scenes/sceneTemplates';
 
 export interface DevelopmentActionPreset {
@@ -6,6 +7,17 @@ export interface DevelopmentActionPreset {
   label: string;
   aliases: string[];
   actions: DrawAction[];
+}
+
+export type DevelopmentCommandSource = 'local' | 'preset';
+
+export interface DevelopmentCommandResolution {
+  ok: boolean;
+  source: DevelopmentCommandSource;
+  actions: DrawAction[];
+  statusText: string;
+  recentText: string;
+  error?: string;
 }
 
 export const DEVELOPMENT_ACTION_PRESETS: DevelopmentActionPreset[] = [
@@ -147,6 +159,54 @@ export function resolveDevelopmentActions(input: string): DrawAction[] | null {
   );
 
   return preset?.actions ?? null;
+}
+
+export function resolveDevelopmentCommand(input: string): DevelopmentCommandResolution {
+  const trimmedInput = input.trim();
+
+  if (!trimmedInput) {
+    return {
+      ok: false,
+      source: 'local',
+      actions: [],
+      statusText: '开发辅助输入为空。',
+      recentText: '开发辅助输入为空',
+      error: '请输入开发辅助命令。',
+    };
+  }
+
+  const localResult = parseLocalCommand(trimmedInput);
+
+  if (localResult.ok) {
+    return {
+      ok: true,
+      source: 'local',
+      actions: localResult.actions,
+      statusText: `本地解析(local)：${localResult.reason}，${formatDrawActions(localResult.actions)}`,
+      recentText: `开发辅助输入：${trimmedInput}`,
+    };
+  }
+
+  const presetActions = resolveDevelopmentActions(trimmedInput);
+
+  if (presetActions) {
+    return {
+      ok: true,
+      source: 'preset',
+      actions: presetActions,
+      statusText: `已执行开发辅助 action：${formatDrawActions(presetActions)}`,
+      recentText: `开发辅助输入：${trimmedInput}`,
+    };
+  }
+
+  return {
+    ok: false,
+    source: 'local',
+    actions: [],
+    statusText: localResult.error,
+    recentText: `开发辅助输入：${trimmedInput}`,
+    error: localResult.error,
+  };
 }
 
 export function formatDrawAction(action: DrawAction): string {
