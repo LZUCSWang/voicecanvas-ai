@@ -102,6 +102,7 @@ export interface ResolveCommandContext {
   canvasRevision?: number;
   conversationRevision?: number;
   forceLocalFallback?: boolean;
+  abortSignal?: AbortSignal;
 }
 
 type ModelParserOutput = { actions: DrawAction[] } | { scenePlan: AiScenePlan };
@@ -366,6 +367,17 @@ export function createAiCommandResolver({
       return resolveLocalFallback(text, localResult, normalizedText, fallbackReason, undefined, payload);
     }
 
+    if (context.abortSignal?.aborted) {
+      return resolveLocalFallback(
+        text,
+        localResult,
+        normalizedText,
+        'backend-unavailable',
+        'AI parser request aborted.',
+        payload,
+      );
+    }
+
     const cacheKey = createCommandCacheKey(normalizedText, canvasRevision, conversationRevision);
     const cached = cache.get(cacheKey);
 
@@ -381,7 +393,7 @@ export function createAiCommandResolver({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
-      }, timeoutMs);
+      }, timeoutMs, context.abortSignal);
       const responseBody = await readJsonResponse(response);
 
       if (!response.ok) {
@@ -578,27 +590,48 @@ async function fetchWithTimeout(
   endpoint: string,
   requestInit: RequestInit,
   timeoutMs: number,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
   if (timeoutMs <= 0 || typeof AbortController === 'undefined') {
-    return fetchFn(endpoint, requestInit);
+    return fetchFn(endpoint, {
+      ...requestInit,
+      signal: externalSignal,
+    });
   }
 
   const controller = new AbortController();
+  const abortFromExternalSignal = () => controller.abort();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  externalSignal?.addEventListener('abort', abortFromExternalSignal, { once: true });
 
   try {
-    return await fetchFn(endpoint, {
+    if (externalSignal?.aborted) {
+      controller.abort();
+    }
+
+    const response = await fetchFn(endpoint, {
       ...requestInit,
       signal: controller.signal,
     });
+
+    if (controller.signal.aborted) {
+      throw new Error(externalSignal?.aborted ? 'AI parser request aborted.' : 'AI parser request timed out.');
+    }
+
+    return response;
   } catch (error) {
     if (controller.signal.aborted) {
+      if (externalSignal?.aborted) {
+        throw new Error('AI parser request aborted.');
+      }
+
       throw new Error('AI parser request timed out.');
     }
 
     throw error;
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', abortFromExternalSignal);
   }
 }
 
