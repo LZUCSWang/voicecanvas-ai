@@ -15,6 +15,11 @@ import {
   type CommandConversationItem,
   type CommandParseResolution,
 } from './features/commands/aiCommandFallback';
+import {
+  createCommandPriorityController,
+  STALE_COMMAND_MESSAGE,
+  type CommandPriorityToken,
+} from './features/commands/commandPriority';
 import { parseLocalCommand } from './features/commands/localCommandParser';
 import {
   DEVELOPMENT_ACTION_PRESETS,
@@ -212,6 +217,7 @@ export function App() {
   const [recentExecutedActions, setRecentExecutedActions] = useState<DrawAction[]>(DEMO_ACTIONS);
   const [canvasRevision, setCanvasRevision] = useState(DEMO_ACTIONS.length);
   const [conversationRevision, setConversationRevision] = useState(0);
+  const commandPriorityRef = useRef(createCommandPriorityController());
 
   const executeCommandText = useCallback(async (text: string, source: '语音输入' | '开发辅助', shouldSpeak: boolean) => {
     const trimmedText = text.trim();
@@ -227,13 +233,16 @@ export function App() {
         contextLabel: '未发送上下文',
         actionLabel: '-',
       });
+      setIsCommandProcessing(false);
       return false;
     }
+
+    const commandToken = commandPriorityRef.current.beginCommand();
 
     setRecentText(`${source}：${trimmedText}`);
     setIsCommandProcessing(true);
     setCommandParseMeta(createProcessingCommandParseMeta(trimmedText));
-    setSystemStatus('正在解析指令，请稍候。');
+    setSystemStatus(commandToken.replacedPrevious ? STALE_COMMAND_MESSAGE : '正在解析指令，请稍候。');
 
     const currentConversation = conversationLog;
     const currentRecentActions = recentExecutedActions;
@@ -243,7 +252,12 @@ export function App() {
       recentActions: currentRecentActions,
       canvasRevision,
       conversationRevision,
+      abortSignal: commandToken.signal,
     });
+
+    if (commandPriorityRef.current.ignoreIfStale(commandToken)) {
+      return false;
+    }
 
     setCommandParseMeta(createCommandParseMeta(resolution));
     setIsCommandProcessing(false);
@@ -260,6 +274,7 @@ export function App() {
         speakSpeechFeedback(resolution.feedbackText);
       }
 
+      commandPriorityRef.current.finishCommand(commandToken);
       return false;
     }
 
@@ -267,6 +282,11 @@ export function App() {
     const targetedFeedback = getTargetedExecutionFeedback(execution.results);
     const singleEditFeedback = getSingleEditFeedback(execution.results);
     const exportFeedback = await getExportFeedback(execution.results, canvasSvgRef.current);
+
+    if (commandPriorityRef.current.ignoreIfStale(commandToken)) {
+      return false;
+    }
+
     const finalFeedbackText = exportFeedback ?? targetedFeedback ?? singleEditFeedback ?? resolution.feedbackText;
     const drawActions = filterDrawActions(resolution.actions);
 
@@ -297,6 +317,7 @@ export function App() {
       ...currentHistory,
     ]);
 
+    commandPriorityRef.current.finishCommand(commandToken);
     return true;
   }, [canvasRevision, conversationLog, conversationRevision, drawingHistory, drawingState, recentExecutedActions]);
 
@@ -323,11 +344,26 @@ export function App() {
   });
   const speechControlState = getSpeechControlState({ isSupported: isSpeechSupported, status: speechStatus });
 
-  async function executeDevelopmentActions(actions: DrawingHistoryAction[], sourceText: string, statusText?: string) {
+  async function executeDevelopmentActions(
+    actions: DrawingHistoryAction[],
+    sourceText: string,
+    statusText?: string,
+    commandToken: CommandPriorityToken = commandPriorityRef.current.beginCommand(),
+  ) {
+    if (commandToken.replacedPrevious) {
+      setSystemStatus(STALE_COMMAND_MESSAGE);
+      setIsCommandProcessing(false);
+    }
+
     const execution = executeDrawingHistoryActionsWithResults(drawingHistory, actions);
     const targetedFeedback = getTargetedExecutionFeedback(execution.results);
     const singleEditFeedback = getSingleEditFeedback(execution.results);
     const exportFeedback = await getExportFeedback(execution.results, canvasSvgRef.current);
+
+    if (commandPriorityRef.current.ignoreIfStale(commandToken)) {
+      return;
+    }
+
     const resultLabel = exportFeedback ?? targetedFeedback ?? singleEditFeedback ?? statusText ?? formatDrawActions(actions);
     const drawActions = filterDrawActions(actions);
 
@@ -349,6 +385,7 @@ export function App() {
       },
       ...currentHistory,
     ]);
+    commandPriorityRef.current.finishCommand(commandToken);
   }
 
   async function handleDevelopmentSubmit(event: FormEvent<HTMLFormElement>) {
@@ -372,7 +409,13 @@ export function App() {
     const presetActions = resolveDevelopmentActions(trimmedInput);
 
     if (presetActions) {
-      await executeDevelopmentActions(presetActions, trimmedInput, `已执行开发辅助 action：${formatDrawActions(presetActions)}`);
+      const commandToken = commandPriorityRef.current.beginCommand();
+      await executeDevelopmentActions(
+        presetActions,
+        trimmedInput,
+        `已执行开发辅助 action：${formatDrawActions(presetActions)}`,
+        commandToken,
+      );
       setHelperInput('');
       return;
     }
