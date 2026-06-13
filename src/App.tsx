@@ -1,9 +1,14 @@
-import { type FormEvent, useCallback, useState } from 'react';
+import { type FormEvent, useCallback, useRef, useState } from 'react';
 import { appInfo } from './appInfo';
 import { Canvas } from './components/Canvas';
-import { executeDrawingAction, executeDrawingActionWithResult, type DrawingActionExecutionResult } from './domain/drawingExecutor';
+import { executeDrawingAction } from './domain/drawingExecutor';
+import {
+  createInitialDrawingHistoryState,
+  executeDrawingHistoryActionsWithResults,
+  type DrawingHistoryActionExecutionResult,
+} from './domain/drawingHistory';
 import { createInitialDrawingState } from './domain/drawingState';
-import type { DrawAction, DrawingState } from './domain/drawingTypes';
+import type { DrawAction, DrawingHistoryAction, DrawingHistoryState, DrawingState } from './domain/drawingTypes';
 import {
   resolveCommandWithAiFallback,
   shouldUseAiParser,
@@ -17,6 +22,7 @@ import {
   formatDrawActions,
   resolveDevelopmentActions,
 } from './features/developmentActions';
+import { exportCanvasAsImage } from './features/export/canvasExport';
 import {
   getSpeechControlState,
   speakSpeechFeedback,
@@ -80,30 +86,58 @@ function createInitialCommandParseMeta(): CommandParseMeta {
   };
 }
 
-function executeDrawingActionsWithResults(state: DrawingState, actions: DrawAction[]) {
-  const results: DrawingActionExecutionResult[] = [];
-  const nextState = actions.reduce((currentState, action) => {
-    const actionResult = executeDrawingActionWithResult(currentState, action);
-    results.push(actionResult);
-    return actionResult.state;
-  }, state);
-
-  return {
-    state: nextState,
-    results,
-  };
-}
-
-function getTargetedExecutionFeedback(results: DrawingActionExecutionResult[]): string | null {
+function getTargetedExecutionFeedback(results: DrawingHistoryActionExecutionResult[]): string | null {
   for (let index = results.length - 1; index >= 0; index -= 1) {
     const result = results[index];
+    const action = result.drawingResult?.action ?? result.action;
 
-    if (result.action.type === 'update' || result.action.type === 'delete') {
-      return result.feedbackText;
+    if (action.type === 'update' || action.type === 'delete') {
+      return result.drawingResult?.feedbackText ?? result.feedbackText;
     }
   }
 
   return null;
+}
+
+function getSingleEditFeedback(results: DrawingHistoryActionExecutionResult[]): string | null {
+  if (results.length !== 1) {
+    return null;
+  }
+
+  const [result] = results;
+
+  if (result.action.type === 'clear' || result.action.type === 'undo' || result.action.type === 'redo') {
+    return result.feedbackText;
+  }
+
+  return null;
+}
+
+function filterDrawActions(actions: DrawingHistoryAction[]): DrawAction[] {
+  return actions.filter((action): action is DrawAction =>
+    action.type === 'create' || action.type === 'update' || action.type === 'delete' || action.type === 'clear',
+  );
+}
+
+async function getExportFeedback(
+  results: DrawingHistoryActionExecutionResult[],
+  svgElement: SVGSVGElement | null,
+): Promise<string | null> {
+  if (!results.some((result) => result.exportRequested)) {
+    return null;
+  }
+
+  const result = await exportCanvasAsImage(svgElement);
+
+  if (!result.ok) {
+    return result.error ?? '导出失败，请稍后重试。';
+  }
+
+  if (result.format === 'png') {
+    return `已导出 PNG：${result.fileName}`;
+  }
+
+  return `PNG 导出受浏览器限制，已改为 SVG：${result.fileName}`;
 }
 
 function createProcessingCommandParseMeta(text: string): CommandParseMeta {
@@ -163,7 +197,11 @@ function keepRecentActions(actions: DrawAction[]) {
 }
 
 export function App() {
-  const [drawingState, setDrawingState] = useState(createDemoDrawingState);
+  const canvasSvgRef = useRef<SVGSVGElement | null>(null);
+  const [drawingHistory, setDrawingHistory] = useState<DrawingHistoryState>(() =>
+    createInitialDrawingHistoryState(createDemoDrawingState()),
+  );
+  const drawingState = drawingHistory.present;
   const [helperInput, setHelperInput] = useState('');
   const [systemStatus, setSystemStatus] = useState('SVG 画布已就绪，请点击开始监听授权麦克风。');
   const [recentText, setRecentText] = useState('尚无语音识别文本');
@@ -225,14 +263,21 @@ export function App() {
       return false;
     }
 
-    const execution = executeDrawingActionsWithResults(drawingState, resolution.actions);
+    const execution = executeDrawingHistoryActionsWithResults(drawingHistory, resolution.actions);
     const targetedFeedback = getTargetedExecutionFeedback(execution.results);
-    const finalFeedbackText = targetedFeedback ?? resolution.feedbackText;
+    const singleEditFeedback = getSingleEditFeedback(execution.results);
+    const exportFeedback = await getExportFeedback(execution.results, canvasSvgRef.current);
+    const finalFeedbackText = exportFeedback ?? targetedFeedback ?? singleEditFeedback ?? resolution.feedbackText;
+    const drawActions = filterDrawActions(resolution.actions);
 
-    setDrawingState(execution.state);
-    setCanvasRevision((currentRevision) => currentRevision + 1);
+    setDrawingHistory(execution.history);
+    if (execution.results.some((result) => result.changed)) {
+      setCanvasRevision((currentRevision) => currentRevision + 1);
+    }
     setSystemStatus(`${resolution.statusText} ${finalFeedbackText}`);
-    setRecentExecutedActions((currentActions) => keepRecentActions([...currentActions, ...resolution.actions]));
+    if (drawActions.length > 0) {
+      setRecentExecutedActions((currentActions) => keepRecentActions([...currentActions, ...drawActions]));
+    }
     setConversationLog((currentLog) => [
       ...currentLog,
       createConversationEntry(trimmedText, resolution, finalFeedbackText),
@@ -253,7 +298,7 @@ export function App() {
     ]);
 
     return true;
-  }, [canvasRevision, conversationLog, conversationRevision, drawingState, recentExecutedActions]);
+  }, [canvasRevision, conversationLog, conversationRevision, drawingHistory, drawingState, recentExecutedActions]);
 
   const executeVoiceCommand = useCallback(
     async (transcript: string) => {
@@ -278,14 +323,21 @@ export function App() {
   });
   const speechControlState = getSpeechControlState({ isSupported: isSpeechSupported, status: speechStatus });
 
-  function executeDevelopmentActions(actions: DrawAction[], sourceText: string, statusText?: string) {
-    const execution = executeDrawingActionsWithResults(drawingState, actions);
+  async function executeDevelopmentActions(actions: DrawingHistoryAction[], sourceText: string, statusText?: string) {
+    const execution = executeDrawingHistoryActionsWithResults(drawingHistory, actions);
     const targetedFeedback = getTargetedExecutionFeedback(execution.results);
-    const resultLabel = targetedFeedback ?? statusText ?? formatDrawActions(actions);
+    const singleEditFeedback = getSingleEditFeedback(execution.results);
+    const exportFeedback = await getExportFeedback(execution.results, canvasSvgRef.current);
+    const resultLabel = exportFeedback ?? targetedFeedback ?? singleEditFeedback ?? statusText ?? formatDrawActions(actions);
+    const drawActions = filterDrawActions(actions);
 
-    setDrawingState(execution.state);
-    setCanvasRevision((currentRevision) => currentRevision + 1);
-    setRecentExecutedActions((currentActions) => keepRecentActions([...currentActions, ...actions]));
+    setDrawingHistory(execution.history);
+    if (execution.results.some((result) => result.changed)) {
+      setCanvasRevision((currentRevision) => currentRevision + 1);
+    }
+    if (drawActions.length > 0) {
+      setRecentExecutedActions((currentActions) => keepRecentActions([...currentActions, ...drawActions]));
+    }
     setRecentText(`开发辅助输入：${sourceText}`);
     setSystemStatus(resultLabel);
     setCommandParseMeta(createPresetCommandParseMeta(resultLabel));
@@ -320,7 +372,7 @@ export function App() {
     const presetActions = resolveDevelopmentActions(trimmedInput);
 
     if (presetActions) {
-      executeDevelopmentActions(presetActions, trimmedInput, `已执行开发辅助 action：${formatDrawActions(presetActions)}`);
+      await executeDevelopmentActions(presetActions, trimmedInput, `已执行开发辅助 action：${formatDrawActions(presetActions)}`);
       setHelperInput('');
       return;
     }
@@ -348,7 +400,7 @@ export function App() {
 
         <div className="workspace-grid">
           <section className="canvas-panel" aria-label="绘图画布区域">
-            <Canvas state={drawingState} />
+            <Canvas state={drawingState} svgRef={canvasSvgRef} />
           </section>
 
           <aside className="side-panel" aria-label="绘图状态面板">
@@ -380,6 +432,35 @@ export function App() {
               <p className="voice-help">浏览器可能会要求你点击一次开始按钮授权麦克风；后续绘图创作通过语音完成。</p>
               {!isSpeechSupported && <p className="voice-error">{supportMessage}</p>}
               {speechError && <p className="voice-error">{speechError.message}</p>}
+            </section>
+
+            <section className="tool-panel edit-panel" aria-labelledby="edit-actions-heading">
+              <div className="panel-heading">
+                <span className="label">Edit</span>
+                <h2 id="edit-actions-heading">编辑操作</h2>
+              </div>
+              <div className="edit-actions" aria-label="编辑操作">
+                <button
+                  type="button"
+                  onClick={() => void executeDevelopmentActions([{ type: 'undo' }], '撤销', '撤销')}
+                  disabled={drawingHistory.past.length === 0}
+                >
+                  撤销
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void executeDevelopmentActions([{ type: 'redo' }], '重做', '重做')}
+                  disabled={drawingHistory.future.length === 0}
+                >
+                  重做
+                </button>
+                <button type="button" onClick={() => void executeDevelopmentActions([{ type: 'clear' }], '清空画布', '清空画布')}>
+                  清空
+                </button>
+                <button type="button" onClick={() => void executeDevelopmentActions([{ type: 'export', format: 'png' }], '导出图片', '导出 PNG')}>
+                  导出 PNG
+                </button>
+              </div>
             </section>
 
             <section className="tool-panel" aria-labelledby="system-status-heading">
@@ -455,7 +536,7 @@ export function App() {
               type="text"
               value={helperInput}
               onChange={(event) => setHelperInput(event.target.value)}
-              placeholder="输入中文命令或预置 action，例如 画一个登录流程图、circle 或 clear"
+              placeholder="输入中文命令或预置 action，例如 画一个登录流程图、撤销、导出图片、circle 或 clear"
               aria-label="开发辅助 action 输入框"
             />
             <button type="submit">执行</button>
