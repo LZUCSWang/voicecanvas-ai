@@ -55,6 +55,13 @@ export interface CanvasObjectStyle {
   strokeWidth?: number;
   strokeStyle?: DrawingStrokeStyle;
   fillOpacity?: number;
+  cornerRadius?: number;
+  cornerRadiusX?: number;
+  cornerRadiusY?: number;
+  arrowHeadSize?: number;
+  lineCap?: 'butt' | 'round' | 'square';
+  lineJoin?: 'miter' | 'round' | 'bevel';
+  dashArray?: string;
 }
 
 export type DrawingGeometry =
@@ -70,6 +77,8 @@ export type DrawingGeometry =
       y: number;
       width: number;
       height: number;
+      rx?: number;
+      ry?: number;
     }
   | {
       kind: 'triangle';
@@ -81,9 +90,28 @@ export type DrawingGeometry =
       end: SvgPoint;
     }
   | {
+      kind: 'polyline';
+      points: SvgPoint[];
+    }
+  | {
+      kind: 'curve';
+      start: SvgPoint;
+      control1: SvgPoint;
+      control2: SvgPoint;
+      end: SvgPoint;
+    }
+  | {
       kind: 'text';
       anchor: SvgPoint;
       fontSize: number;
+    };
+
+export type FreeformDrawingGeometry =
+  | Extract<DrawingGeometry, { kind: 'circle' | 'rectangle' | 'polyline' | 'curve' }>
+  | {
+      kind: 'line' | 'arrow';
+      start: SvgPoint;
+      end: SvgPoint;
     };
 
 export interface CanvasObject {
@@ -117,6 +145,7 @@ export interface CreateDrawingAction {
     start: SvgPoint;
     end: SvgPoint;
   };
+  customGeometry?: FreeformDrawingGeometry;
 }
 
 export interface DrawingTargetSelector {
@@ -145,6 +174,8 @@ export interface UpdateDrawingChanges {
   strokeWidthDelta?: number;
   strokeStyle?: DrawingStrokeStyle;
   fillOpacityDelta?: number;
+  style?: CanvasObjectStyle;
+  geometry?: FreeformDrawingGeometry;
   layer?: DrawingLayerChange;
 }
 
