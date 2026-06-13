@@ -34,7 +34,7 @@ describe('Canvas', () => {
     expect(markup).toContain('<rect');
     expect(markup).toContain('<polygon');
     expect(markup).toContain('data-object-type="line"');
-    expect(markup).toContain('marker-end="url(#arrow-head)"');
+    expect(markup).toContain('marker-end="url(#arrow-head-');
     expect(markup).toContain('>Demo text</text>');
   });
 
@@ -78,5 +78,107 @@ describe('Canvas', () => {
     expect(markup).toContain('stroke-width="6"');
     expect(markup).toContain('fill-opacity="0.1"');
     expect(markup).toContain('fill-opacity="0.16"');
+  });
+
+  it('shrinks long text to fit inside its drawing bounds', () => {
+    const state = [
+      {
+        type: 'create',
+        objectType: 'text',
+        text: 'Multi-Head Self-Attention',
+        color: '#111827',
+        position: 'center',
+        size: 'small',
+        customBounds: { x: 268, y: 202, width: 264, height: 42 },
+      } satisfies DrawAction,
+      {
+        type: 'update',
+        target: { objectType: 'text' },
+        changes: { scale: 1.2 },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('>Multi-Head Self-Attention</text>');
+    expect(markup).toContain('font-size="19"');
+  });
+
+  it('keeps arrow heads visually stable when AI makes connector lines thicker', () => {
+    const state = [
+      {
+        type: 'create',
+        objectType: 'arrow',
+        color: '#e11d48',
+        position: 'center',
+        size: 'medium',
+        customLine: {
+          start: { x: 400, y: 150 },
+          end: { x: 400, y: 230 },
+        },
+      } satisfies DrawAction,
+      {
+        type: 'update',
+        target: { objectType: 'arrow' },
+        changes: { strokeWidthDelta: 8 },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('markerUnits="userSpaceOnUse"');
+    expect(markup).toContain('markerWidth="10"');
+    expect(markup).toContain('markerHeight="10"');
+    expect(markup).toContain('stroke-width="12"');
+  });
+
+  it('renders AI-controlled rounded rectangles, polylines, curves, and arrow head sizes', () => {
+    const actions = [
+      {
+        type: 'create',
+        objectType: 'rectangle',
+        color: '#7c3aed',
+        customGeometry: { kind: 'rectangle', x: 120, y: 80, width: 180, height: 72, rx: 22, ry: 14 },
+        style: { fillOpacity: 0.24, strokeWidth: 5 },
+      },
+      {
+        type: 'create',
+        objectType: 'arrow',
+        color: '#e11d48',
+        customGeometry: {
+          kind: 'polyline',
+          points: [
+            { x: 310, y: 116 },
+            { x: 370, y: 116 },
+            { x: 370, y: 190 },
+            { x: 480, y: 190 },
+          ],
+        },
+        style: { arrowHeadSize: 16, strokeWidth: 4, lineJoin: 'round' },
+      },
+      {
+        type: 'create',
+        objectType: 'line',
+        color: '#0f766e',
+        customGeometry: {
+          kind: 'curve',
+          start: { x: 100, y: 270 },
+          control1: { x: 190, y: 210 },
+          control2: { x: 310, y: 330 },
+          end: { x: 430, y: 270 },
+        },
+      },
+    ] satisfies DrawAction[];
+    const state = actions.reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('rx="22"');
+    expect(markup).toContain('ry="14"');
+    expect(markup).toContain('fill-opacity="0.24"');
+    expect(markup).toContain('markerWidth="16"');
+    expect(markup).toContain('d="M 310 116 L 370 116 L 370 190 L 480 190"');
+    expect(markup).toContain('stroke-linejoin="round"');
+    expect(markup).toContain('d="M 100 270 C 190 210, 310 330, 430 270"');
   });
 });

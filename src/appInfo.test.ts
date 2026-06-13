@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { appInfo } from './appInfo';
 
 describe('appInfo', () => {
-  it('describes fine-grained editing without claiming cloud or export features', () => {
+  it('describes AI command fallback without claiming export features', () => {
     expect(appInfo.name).toBe('VoiceCanvas AI');
-    expect(appInfo.status).toBe('fine-grained-editing');
+    expect(appInfo.status).toBe('ai-command-fallback');
     expect(appInfo.availableFeatures).toEqual([
       'SVG drawing canvas',
       'Status and history panels',
@@ -14,6 +14,8 @@ describe('appInfo', () => {
       'Web Speech voice control',
       'Speech synthesis feedback',
       'Targeted fine-grained canvas editing',
+      'AI-first contextual command parsing',
+      'Client-side AI response validation',
     ]);
   });
 });

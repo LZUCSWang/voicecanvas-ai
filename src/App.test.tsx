@@ -8,6 +8,13 @@ describe('App', () => {
 
     expect(markup).toContain('VoiceCanvas AI');
     expect(markup).toContain('系统状态');
+    expect(markup).toContain('解析来源');
+    expect(markup).toContain('耗时');
+    expect(markup).toContain('本次结果');
+    expect(markup).toContain('上下文');
+    expect(markup).toContain('动作摘要');
+    expect(markup).toContain('尚未请求上下文');
+    expect(markup).toContain('尚未解析');
     expect(markup).toContain('最近识别文本');
     expect(markup).toContain('执行动作历史');
     expect(markup).toContain('语音控制');
