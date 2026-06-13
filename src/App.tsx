@@ -4,15 +4,20 @@ import { Canvas } from './components/Canvas';
 import { executeDrawingAction, executeDrawingActionWithResult, type DrawingActionExecutionResult } from './domain/drawingExecutor';
 import { createInitialDrawingState } from './domain/drawingState';
 import type { DrawAction, DrawingState } from './domain/drawingTypes';
+import {
+  resolveCommandWithAiFallback,
+  shouldUseAiParser,
+  type CommandConversationItem,
+  type CommandParseResolution,
+} from './features/commands/aiCommandFallback';
 import { parseLocalCommand } from './features/commands/localCommandParser';
 import {
   DEVELOPMENT_ACTION_PRESETS,
   formatDrawAction,
   formatDrawActions,
-  resolveDevelopmentCommand,
+  resolveDevelopmentActions,
 } from './features/developmentActions';
 import {
-  buildSpeechCommandFeedback,
   getSpeechControlState,
   speakSpeechFeedback,
   type SpeechRecognitionStatus,
@@ -21,8 +26,17 @@ import { useSpeechRecognition } from './features/speech/useSpeechRecognition';
 
 interface ActionHistoryItem {
   id: string;
-  source: '预置示例' | '开发辅助' | '语音输入';
+  source: string;
   label: string;
+}
+
+interface CommandParseMeta {
+  sourceLabel: string;
+  elapsedLabel: string;
+  resultLabel: string;
+  errorText: string;
+  contextLabel: string;
+  actionLabel: string;
 }
 
 const SPEECH_STATUS_LABELS: SpeechRecognitionStatus[] = ['idle', 'listening', 'processing', 'error'];
@@ -55,6 +69,17 @@ function createInitialActionHistory(): ActionHistoryItem[] {
   })).reverse();
 }
 
+function createInitialCommandParseMeta(): CommandParseMeta {
+  return {
+    sourceLabel: '尚未解析',
+    elapsedLabel: '-',
+    resultLabel: '尚未解析',
+    errorText: '',
+    contextLabel: '尚未请求上下文',
+    actionLabel: '-',
+  };
+}
+
 function executeDrawingActionsWithResults(state: DrawingState, actions: DrawAction[]) {
   const results: DrawingActionExecutionResult[] = [];
   const nextState = actions.reduce((currentState, action) => {
@@ -81,41 +106,161 @@ function getTargetedExecutionFeedback(results: DrawingActionExecutionResult[]): 
   return null;
 }
 
+function createProcessingCommandParseMeta(text: string): CommandParseMeta {
+  const localResult = parseLocalCommand(text);
+  const willUseAi = shouldUseAiParser(text, localResult);
+
+  return {
+    sourceLabel: willUseAi ? 'ai / processing' : 'local / processing',
+    elapsedLabel: '-',
+    resultLabel: willUseAi ? 'AI 正在理解' : '本地解析中',
+    errorText: '',
+    contextLabel: willUseAi ? '准备携带 canvas / conversation / recentActions' : '本地预置不发送上下文',
+    actionLabel: '-',
+  };
+}
+
+function createCommandParseMeta(result: CommandParseResolution): CommandParseMeta {
+  return {
+    sourceLabel: result.fromCache ? `${result.source} / cache` : result.source,
+    elapsedLabel: `${result.elapsedMs}ms`,
+    resultLabel: result.sceneType ? `${result.sceneType} 场景` : result.actionSummary,
+    errorText: result.ok ? '' : result.statusText,
+    contextLabel: `canvas:${result.sentContext.canvas ? 'yes' : 'no'} / conversation:${result.sentContext.conversation ? 'yes' : 'no'} / recentActions:${result.sentContext.recentActions ? 'yes' : 'no'}`,
+    actionLabel: result.actionSummary,
+  };
+}
+
+function createPresetCommandParseMeta(label: string): CommandParseMeta {
+  return {
+    sourceLabel: 'preset',
+    elapsedLabel: '0ms',
+    resultLabel: label,
+    errorText: '',
+    contextLabel: '开发预置未请求 AI',
+    actionLabel: label,
+  };
+}
+
+function createConversationEntry(
+  text: string,
+  resolution: CommandParseResolution,
+  feedback: string,
+): CommandConversationItem {
+  return {
+    text,
+    source: resolution.source,
+    feedback,
+    error: resolution.error,
+    actionSummary: resolution.actionSummary,
+    elapsedMs: resolution.elapsedMs,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function keepRecentActions(actions: DrawAction[]) {
+  return actions.slice(-20);
+}
+
 export function App() {
   const [drawingState, setDrawingState] = useState(createDemoDrawingState);
   const [helperInput, setHelperInput] = useState('');
   const [systemStatus, setSystemStatus] = useState('SVG 画布已就绪，请点击开始监听授权麦克风。');
   const [recentText, setRecentText] = useState('尚无语音识别文本');
   const [actionHistory, setActionHistory] = useState(createInitialActionHistory);
+  const [commandParseMeta, setCommandParseMeta] = useState(createInitialCommandParseMeta);
+  const [isCommandProcessing, setIsCommandProcessing] = useState(false);
+  const [conversationLog, setConversationLog] = useState<CommandConversationItem[]>([]);
+  const [recentExecutedActions, setRecentExecutedActions] = useState<DrawAction[]>(DEMO_ACTIONS);
+  const [canvasRevision, setCanvasRevision] = useState(DEMO_ACTIONS.length);
+  const [conversationRevision, setConversationRevision] = useState(0);
 
-  const executeVoiceCommand = useCallback((transcript: string) => {
-    const parseResult = parseLocalCommand(transcript);
-    const feedback = buildSpeechCommandFeedback(parseResult, transcript);
+  const executeCommandText = useCallback(async (text: string, source: '语音输入' | '开发辅助', shouldSpeak: boolean) => {
+    const trimmedText = text.trim();
 
-    setRecentText(`语音识别：${transcript}`);
-
-    if (!feedback.ok) {
-      setSystemStatus(feedback.statusText);
-      feedback.speakFeedback();
-      return;
+    if (!trimmedText) {
+      const emptyMessage = source === '语音输入' ? '没有识别到语音文本，请再说一次。' : '开发辅助输入为空。';
+      setSystemStatus(emptyMessage);
+      setCommandParseMeta({
+        sourceLabel: 'local',
+        elapsedLabel: '0ms',
+        resultLabel: '未生成动作',
+        errorText: emptyMessage,
+        contextLabel: '未发送上下文',
+        actionLabel: '-',
+      });
+      return false;
     }
 
-    const execution = executeDrawingActionsWithResults(drawingState, feedback.actions);
+    setRecentText(`${source}：${trimmedText}`);
+    setIsCommandProcessing(true);
+    setCommandParseMeta(createProcessingCommandParseMeta(trimmedText));
+    setSystemStatus('正在解析指令，请稍候。');
+
+    const currentConversation = conversationLog;
+    const currentRecentActions = recentExecutedActions;
+    const resolution = await resolveCommandWithAiFallback(trimmedText, {
+      drawingState,
+      conversation: currentConversation,
+      recentActions: currentRecentActions,
+      canvasRevision,
+      conversationRevision,
+    });
+
+    setCommandParseMeta(createCommandParseMeta(resolution));
+    setIsCommandProcessing(false);
+
+    if (!resolution.ok) {
+      setSystemStatus(resolution.statusText);
+      setConversationLog((currentLog) => [
+        ...currentLog,
+        createConversationEntry(trimmedText, resolution, resolution.feedbackText),
+      ].slice(-10));
+      setConversationRevision((currentRevision) => currentRevision + 1);
+
+      if (shouldSpeak) {
+        speakSpeechFeedback(resolution.feedbackText);
+      }
+
+      return false;
+    }
+
+    const execution = executeDrawingActionsWithResults(drawingState, resolution.actions);
     const targetedFeedback = getTargetedExecutionFeedback(execution.results);
-    const finalFeedbackText = targetedFeedback ?? feedback.feedbackText;
+    const finalFeedbackText = targetedFeedback ?? resolution.feedbackText;
 
     setDrawingState(execution.state);
-    setSystemStatus(`${feedback.statusText} ${finalFeedbackText}`);
-    speakSpeechFeedback(finalFeedbackText);
+    setCanvasRevision((currentRevision) => currentRevision + 1);
+    setSystemStatus(`${resolution.statusText} ${finalFeedbackText}`);
+    setRecentExecutedActions((currentActions) => keepRecentActions([...currentActions, ...resolution.actions]));
+    setConversationLog((currentLog) => [
+      ...currentLog,
+      createConversationEntry(trimmedText, resolution, finalFeedbackText),
+    ].slice(-10));
+    setConversationRevision((currentRevision) => currentRevision + 1);
+
+    if (shouldSpeak) {
+      speakSpeechFeedback(finalFeedbackText);
+    }
+
     setActionHistory((currentHistory) => [
       {
-        id: `voice-${currentHistory.length}-${Date.now()}`,
-        source: '语音输入',
-        label: targetedFeedback ?? formatDrawActions(feedback.actions),
+        id: `${source}-${currentHistory.length}-${Date.now()}`,
+        source: `${source}/${resolution.source}`,
+        label: targetedFeedback ?? resolution.actionSummary,
       },
       ...currentHistory,
     ]);
-  }, [drawingState]);
+
+    return true;
+  }, [canvasRevision, conversationLog, conversationRevision, drawingState, recentExecutedActions]);
+
+  const executeVoiceCommand = useCallback(
+    async (transcript: string) => {
+      await executeCommandText(transcript, '语音输入', true);
+    },
+    [executeCommandText],
+  );
 
   const {
     status: speechStatus,
@@ -136,10 +281,14 @@ export function App() {
   function executeDevelopmentActions(actions: DrawAction[], sourceText: string, statusText?: string) {
     const execution = executeDrawingActionsWithResults(drawingState, actions);
     const targetedFeedback = getTargetedExecutionFeedback(execution.results);
+    const resultLabel = targetedFeedback ?? statusText ?? formatDrawActions(actions);
 
     setDrawingState(execution.state);
+    setCanvasRevision((currentRevision) => currentRevision + 1);
+    setRecentExecutedActions((currentActions) => keepRecentActions([...currentActions, ...actions]));
     setRecentText(`开发辅助输入：${sourceText}`);
-    setSystemStatus(targetedFeedback ?? statusText ?? `已执行开发辅助 action：${formatDrawActions(actions)}`);
+    setSystemStatus(resultLabel);
+    setCommandParseMeta(createPresetCommandParseMeta(resultLabel));
     setActionHistory((currentHistory) => [
       {
         id: `dev-${currentHistory.length}-${Date.now()}`,
@@ -150,19 +299,37 @@ export function App() {
     ]);
   }
 
-  function handleDevelopmentSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleDevelopmentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedInput = helperInput.trim();
 
-    const resolution = resolveDevelopmentCommand(helperInput);
-
-    if (!resolution.ok) {
-      setRecentText(resolution.recentText);
-      setSystemStatus(resolution.statusText);
+    if (!trimmedInput) {
+      setRecentText('开发辅助输入为空');
+      setSystemStatus('开发辅助输入为空。');
+      setCommandParseMeta({
+        sourceLabel: 'local',
+        elapsedLabel: '0ms',
+        resultLabel: '未生成动作',
+        errorText: '请输入开发辅助命令。',
+        contextLabel: '未发送上下文',
+        actionLabel: '-',
+      });
       return;
     }
 
-    executeDevelopmentActions(resolution.actions, helperInput.trim(), resolution.statusText);
-    setHelperInput('');
+    const presetActions = resolveDevelopmentActions(trimmedInput);
+
+    if (presetActions) {
+      executeDevelopmentActions(presetActions, trimmedInput, `已执行开发辅助 action：${formatDrawActions(presetActions)}`);
+      setHelperInput('');
+      return;
+    }
+
+    const executed = await executeCommandText(trimmedInput, '开发辅助', false);
+
+    if (executed) {
+      setHelperInput('');
+    }
   }
 
   return (
@@ -221,6 +388,36 @@ export function App() {
                 <h2 id="system-status-heading">系统状态</h2>
               </div>
               <p className="panel-value">{systemStatus}</p>
+            </section>
+
+            <section className="tool-panel parse-panel" aria-labelledby="parse-status-heading" aria-busy={isCommandProcessing}>
+              <div className="panel-heading">
+                <span className="label">Parser</span>
+                <h2 id="parse-status-heading">解析来源</h2>
+              </div>
+              <dl className="parse-meta">
+                <div>
+                  <dt>解析来源</dt>
+                  <dd>{commandParseMeta.sourceLabel}</dd>
+                </div>
+                <div>
+                  <dt>耗时</dt>
+                  <dd>{commandParseMeta.elapsedLabel}</dd>
+                </div>
+                <div>
+                  <dt>本次结果</dt>
+                  <dd>{commandParseMeta.resultLabel}</dd>
+                </div>
+                <div>
+                  <dt>上下文</dt>
+                  <dd>{commandParseMeta.contextLabel}</dd>
+                </div>
+                <div>
+                  <dt>动作摘要</dt>
+                  <dd>{commandParseMeta.actionLabel}</dd>
+                </div>
+              </dl>
+              {commandParseMeta.errorText && <p className="voice-error">{commandParseMeta.errorText}</p>}
             </section>
 
             <section className="tool-panel" aria-labelledby="recent-text-heading">

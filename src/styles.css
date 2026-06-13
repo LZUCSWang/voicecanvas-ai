@@ -269,6 +269,44 @@ h2 {
   background: #fff1f2;
 }
 
+.parse-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.parse-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.parse-meta div {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.parse-meta dt,
+.parse-meta dd {
+  margin: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.parse-meta dt {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.parse-meta dd {
+  color: #111827;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
 .history-panel {
   max-height: 360px;
   overflow: auto;
