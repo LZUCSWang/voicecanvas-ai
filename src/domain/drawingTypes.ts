@@ -95,6 +95,11 @@ export interface CreateDrawingAction {
   position?: DrawingPosition;
   size?: DrawingSize;
   text?: string;
+  customBounds?: SvgBounds;
+  customLine?: {
+    start: SvgPoint;
+    end: SvgPoint;
+  };
 }
 
 export interface UpdateDrawingAction {

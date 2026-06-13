@@ -7,7 +7,8 @@ import type { DrawAction, DrawingState } from './domain/drawingTypes';
 import {
   DEVELOPMENT_ACTION_PRESETS,
   formatDrawAction,
-  resolveDevelopmentAction,
+  formatDrawActions,
+  resolveDevelopmentActions,
 } from './features/developmentActions';
 
 interface ActionHistoryItem {
@@ -51,15 +52,15 @@ export function App() {
   const [recentText, setRecentText] = useState('尚无真实语音识别文本');
   const [actionHistory, setActionHistory] = useState(createInitialActionHistory);
 
-  function executeDevelopmentAction(action: DrawAction, sourceText: string) {
-    setDrawingState((currentState) => executeDrawingAction(currentState, action));
+  function executeDevelopmentActions(actions: DrawAction[], sourceText: string) {
+    setDrawingState((currentState) => actions.reduce(executeDrawingAction, currentState));
     setRecentText(`开发辅助输入：${sourceText}`);
-    setSystemStatus(`已执行开发辅助 action：${formatDrawAction(action)}`);
+    setSystemStatus(`已执行开发辅助 action：${formatDrawActions(actions)}`);
     setActionHistory((currentHistory) => [
       {
         id: `dev-${currentHistory.length}-${Date.now()}`,
         source: '开发辅助',
-        label: formatDrawAction(action),
+        label: formatDrawActions(actions),
       },
       ...currentHistory,
     ]);
@@ -68,15 +69,15 @@ export function App() {
   function handleDevelopmentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const action = resolveDevelopmentAction(helperInput);
+    const actions = resolveDevelopmentActions(helperInput);
 
-    if (!action) {
+    if (!actions) {
       setRecentText(helperInput ? `开发辅助输入：${helperInput}` : '开发辅助输入为空');
       setSystemStatus('未匹配到开发预置 action。');
       return;
     }
 
-    executeDevelopmentAction(action, helperInput.trim());
+    executeDevelopmentActions(actions, helperInput.trim());
     setHelperInput('');
   }
 
@@ -143,14 +144,14 @@ export function App() {
               type="text"
               value={helperInput}
               onChange={(event) => setHelperInput(event.target.value)}
-              placeholder="输入预置 action，例如 circle、arrow 或 clear"
+              placeholder="输入预置 action 或 scene，例如 circle、flowchart 或 clear"
               aria-label="开发辅助 action 输入框"
             />
             <button type="submit">执行</button>
           </form>
           <div className="preset-list" aria-label="可用开发预置 action">
             {DEVELOPMENT_ACTION_PRESETS.map((preset) => (
-              <button key={preset.id} type="button" onClick={() => setHelperInput(preset.id)}>
+              <button key={preset.id} type="button" onClick={() => executeDevelopmentActions(preset.actions, preset.id)}>
                 {preset.id}
               </button>
             ))}

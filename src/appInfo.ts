@@ -1,5 +1,10 @@
 export const appInfo = {
   name: 'VoiceCanvas AI',
-  status: 'svg-canvas-ui',
-  availableFeatures: ['SVG drawing canvas', 'Status and history panels', 'Development action presets'],
+  status: 'scene-templates',
+  availableFeatures: [
+    'SVG drawing canvas',
+    'Status and history panels',
+    'Development action presets',
+    'Structured scene templates',
+  ],
 } as const;
