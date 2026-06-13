@@ -132,6 +132,12 @@ export interface DrawingState {
   nextObjectNumber: number;
 }
 
+export interface DrawingHistoryState {
+  past: DrawingState[];
+  present: DrawingState;
+  future: DrawingState[];
+}
+
 export interface CreateDrawingAction {
   type: 'create';
   objectType: DrawingObjectType;
@@ -196,4 +202,19 @@ export interface ClearDrawingAction {
   type: 'clear';
 }
 
+export interface UndoDrawingAction {
+  type: 'undo';
+}
+
+export interface RedoDrawingAction {
+  type: 'redo';
+}
+
+export interface ExportDrawingAction {
+  type: 'export';
+  format?: 'png' | 'svg';
+}
+
 export type DrawAction = CreateDrawingAction | UpdateDrawingAction | DeleteDrawingAction | ClearDrawingAction;
+export type DrawingEditAction = UndoDrawingAction | RedoDrawingAction | ExportDrawingAction;
+export type DrawingHistoryAction = DrawAction | DrawingEditAction;

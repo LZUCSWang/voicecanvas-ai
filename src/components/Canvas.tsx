@@ -1,14 +1,17 @@
 import { getDrawingSizeSpec } from '../domain/drawingState';
 import type { CanvasObject, DrawingGeometry, DrawingObjectType, DrawingState, SvgPoint } from '../domain/drawingTypes';
+import type { Ref } from 'react';
 
 interface CanvasProps {
   state: DrawingState;
+  svgRef?: Ref<SVGSVGElement>;
 }
 
-export function Canvas({ state }: CanvasProps) {
+export function Canvas({ state, svgRef }: CanvasProps) {
   return (
     <div className="canvas-frame">
       <svg
+        ref={svgRef}
         className="drawing-canvas"
         role="img"
         aria-label="VoiceCanvas drawing canvas"

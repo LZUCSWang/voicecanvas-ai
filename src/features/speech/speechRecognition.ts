@@ -1,4 +1,4 @@
-import type { DrawAction, DrawingObjectType } from '../../domain/drawingTypes';
+import type { DrawingHistoryAction, DrawingObjectType } from '../../domain/drawingTypes';
 import type { LocalCommandParseResult } from '../commands/localCommandParser';
 
 export type SpeechRecognitionStatus = 'idle' | 'listening' | 'processing' | 'error';
@@ -86,7 +86,7 @@ export interface SpeechSynthesisTarget {
 
 export interface SpeechCommandFeedback {
   ok: boolean;
-  actions: DrawAction[];
+  actions: DrawingHistoryAction[];
   statusText: string;
   feedbackText: string;
   speakFeedback: (target?: SpeechSynthesisTarget) => boolean;
@@ -258,7 +258,7 @@ export function speakSpeechFeedback(text: string, target: SpeechSynthesisTarget 
   return true;
 }
 
-function getSuccessFeedbackText(actions: DrawAction[], reason: string): string {
+function getSuccessFeedbackText(actions: DrawingHistoryAction[], reason: string): string {
   if (reason.includes('流程图')) {
     return '已生成流程图';
   }
@@ -281,6 +281,18 @@ function getSuccessFeedbackText(actions: DrawAction[], reason: string): string {
 
   if (actions.length === 1 && actions[0].type === 'clear') {
     return '已清空画布';
+  }
+
+  if (actions.length === 1 && actions[0].type === 'undo') {
+    return '已撤销上一步';
+  }
+
+  if (actions.length === 1 && actions[0].type === 'redo') {
+    return '已重做上一步';
+  }
+
+  if (actions.length === 1 && actions[0].type === 'export') {
+    return '正在导出图片';
   }
 
   if (actions.length === 1 && actions[0].type === 'update') {

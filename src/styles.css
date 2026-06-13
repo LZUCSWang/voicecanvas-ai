@@ -218,7 +218,8 @@ h2 {
   gap: 8px;
 }
 
-.voice-actions button {
+.voice-actions button,
+.edit-actions button {
   min-width: 0;
   min-height: 40px;
   padding: 0 10px;
@@ -236,11 +237,30 @@ h2 {
   border-color: #cfd8e3;
 }
 
-.voice-actions button:disabled {
+.voice-actions button:disabled,
+.edit-actions button:disabled {
   cursor: not-allowed;
   color: #94a3b8;
   background: #eef2f6;
   border-color: #d7e0ea;
+}
+
+.edit-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.edit-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.edit-actions button:nth-child(3),
+.edit-actions button:nth-child(4) {
+  color: #315c73;
+  background: #f8fafc;
+  border-color: #cfd8e3;
 }
 
 .voice-help,

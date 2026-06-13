@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { executeDrawingAction } from '../../domain/drawingExecutor';
 import { createInitialDrawingState } from '../../domain/drawingState';
-import type { DrawAction } from '../../domain/drawingTypes';
+import type { DrawAction, DrawingHistoryAction } from '../../domain/drawingTypes';
 import { normalizeCommandText, parseLocalCommand } from './localCommandParser';
 
-function getTextValues(actions: DrawAction[]) {
+function getTextValues(actions: DrawingHistoryAction[]) {
   return actions.flatMap((action) => {
     if (action.type === 'create' && action.objectType === 'text' && action.text) {
       return [action.text];
@@ -12,6 +12,12 @@ function getTextValues(actions: DrawAction[]) {
 
     return [];
   });
+}
+
+function getDrawActions(actions: DrawingHistoryAction[]): DrawAction[] {
+  return actions.filter((action): action is DrawAction =>
+    action.type === 'create' || action.type === 'update' || action.type === 'delete' || action.type === 'clear',
+  );
 }
 
 describe('local Chinese command parser', () => {
@@ -159,6 +165,22 @@ describe('local Chinese command parser', () => {
   });
 
   it.each([
+    ['撤销', { type: 'undo' }, '撤销上一步'],
+    ['重做', { type: 'redo' }, '重做上一步'],
+    ['删除它', { type: 'delete', target: { strategy: 'latest' } }, '删除最近的对象'],
+    ['清空画布', { type: 'clear' }, '清空画布'],
+    ['导出图片', { type: 'export', format: 'png' }, '导出图片'],
+    ['保存作品', { type: 'export', format: 'png' }, '导出图片'],
+  ])('parses local edit command: %s', (command, expectedAction, expectedReason) => {
+    expect(parseLocalCommand(command)).toMatchObject({
+      ok: true,
+      source: 'local',
+      actions: [expectedAction],
+      reason: expectedReason,
+    });
+  });
+
+  it.each([
     ['生成三步流程图', '三步流程图'],
     ['画一个登录流程图', '登录流程图'],
     ['做一个本地解析和云端解析的对比图', '本地解析 vs 云端解析'],
@@ -186,7 +208,7 @@ describe('local Chinese command parser', () => {
       position: 'bottom-right',
     });
 
-    const state = result.actions.reduce(executeDrawingAction, createInitialDrawingState());
+    const state = getDrawActions(result.actions).reduce(executeDrawingAction, createInitialDrawingState());
 
     expect(state.objects.length).toBeGreaterThan(6);
     expect(state.objects.some((object) => object.type === 'text' && object.text === 'VoiceCanvas')).toBe(true);
@@ -201,10 +223,10 @@ describe('local Chinese command parser', () => {
     });
 
     expect(parseLocalCommand('保存')).toMatchObject({
-      ok: false,
+      ok: true,
       source: 'local',
-      actions: [],
-      reason: '当前版本尚未接入导出动作',
+      actions: [{ type: 'export', format: 'png' }],
+      reason: '导出图片',
     });
   });
 });

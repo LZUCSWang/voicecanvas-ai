@@ -1,6 +1,6 @@
 export const appInfo = {
   name: 'VoiceCanvas AI',
-  status: 'ai-command-fallback',
+  status: 'edit-history-export',
   availableFeatures: [
     'SVG drawing canvas',
     'Status and history panels',
@@ -12,5 +12,7 @@ export const appInfo = {
     'Targeted fine-grained canvas editing',
     'AI-first contextual command parsing',
     'Client-side AI response validation',
+    'Undo redo clear delete history',
+    'PNG export with SVG fallback',
   ],
 } as const;
