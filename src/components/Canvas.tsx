@@ -1,5 +1,5 @@
 import { getDrawingSizeSpec } from '../domain/drawingState';
-import type { CanvasObject, DrawingGeometry, DrawingState, SvgPoint } from '../domain/drawingTypes';
+import type { CanvasObject, DrawingGeometry, DrawingObjectType, DrawingState, SvgPoint } from '../domain/drawingTypes';
 
 interface CanvasProps {
   state: DrawingState;
@@ -47,7 +47,8 @@ export function Canvas({ state }: CanvasProps) {
 }
 
 function renderCanvasObject(object: CanvasObject) {
-  const strokeWidth = getDrawingSizeSpec(object.size).strokeWidth;
+  const strokeWidth = object.style?.strokeWidth ?? getDrawingSizeSpec(object.size).strokeWidth;
+  const strokeDasharray = object.style?.strokeStyle === 'dashed' ? '10 8' : undefined;
   const commonProps = {
     'data-object-id': object.id,
     'data-object-type': object.type,
@@ -63,9 +64,10 @@ function renderCanvasObject(object: CanvasObject) {
           cy={object.geometry.cy}
           r={object.geometry.radius}
           fill={object.color}
-          fillOpacity="0.16"
+          fillOpacity={getFillOpacity(object)}
           stroke={object.color}
           strokeWidth={strokeWidth}
+          strokeDasharray={strokeDasharray}
         />
       );
     case 'rectangle':
@@ -79,9 +81,10 @@ function renderCanvasObject(object: CanvasObject) {
           height={object.geometry.height}
           rx="6"
           fill={object.color}
-          fillOpacity="0.14"
+          fillOpacity={getFillOpacity(object)}
           stroke={object.color}
           strokeWidth={strokeWidth}
+          strokeDasharray={strokeDasharray}
         />
       );
     case 'triangle':
@@ -91,16 +94,17 @@ function renderCanvasObject(object: CanvasObject) {
           {...commonProps}
           points={formatPoints(object.geometry.points)}
           fill={object.color}
-          fillOpacity="0.14"
+          fillOpacity={getFillOpacity(object)}
           stroke={object.color}
           strokeLinejoin="round"
           strokeWidth={strokeWidth}
+          strokeDasharray={strokeDasharray}
         />
       );
     case 'line':
-      return renderLineObject(object.id, commonProps, object.geometry, object.color, strokeWidth, false);
+      return renderLineObject(object.id, commonProps, object.geometry, object.color, strokeWidth, strokeDasharray, false);
     case 'arrow':
-      return renderLineObject(object.id, commonProps, object.geometry, object.color, strokeWidth, true);
+      return renderLineObject(object.id, commonProps, object.geometry, object.color, strokeWidth, strokeDasharray, true);
     case 'text':
       return (
         <text
@@ -126,6 +130,7 @@ function renderLineObject(
   geometry: Extract<DrawingGeometry, { kind: 'line' | 'arrow' }>,
   color: string,
   strokeWidth: number,
+  strokeDasharray: string | undefined,
   hasArrowHead: boolean,
 ) {
   return (
@@ -139,9 +144,27 @@ function renderLineObject(
       stroke={color}
       strokeLinecap="round"
       strokeWidth={strokeWidth}
+      strokeDasharray={strokeDasharray}
       markerEnd={hasArrowHead ? 'url(#arrow-head)' : undefined}
     />
   );
+}
+
+function getFillOpacity(object: CanvasObject): number {
+  if (typeof object.style?.fillOpacity === 'number') {
+    return object.style.fillOpacity;
+  }
+
+  const defaults: Record<DrawingObjectType, number> = {
+    circle: 0.16,
+    rectangle: 0.14,
+    triangle: 0.14,
+    line: 0,
+    arrow: 0,
+    text: 1,
+  };
+
+  return defaults[object.type];
 }
 
 function formatPoints(points: [SvgPoint, SvgPoint, SvgPoint]) {

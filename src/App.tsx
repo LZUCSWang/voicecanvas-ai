@@ -1,21 +1,31 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useCallback, useState } from 'react';
 import { appInfo } from './appInfo';
 import { Canvas } from './components/Canvas';
-import { executeDrawingAction } from './domain/drawingExecutor';
+import { executeDrawingAction, executeDrawingActionWithResult, type DrawingActionExecutionResult } from './domain/drawingExecutor';
 import { createInitialDrawingState } from './domain/drawingState';
 import type { DrawAction, DrawingState } from './domain/drawingTypes';
+import { parseLocalCommand } from './features/commands/localCommandParser';
 import {
   DEVELOPMENT_ACTION_PRESETS,
   formatDrawAction,
   formatDrawActions,
   resolveDevelopmentCommand,
 } from './features/developmentActions';
+import {
+  buildSpeechCommandFeedback,
+  getSpeechControlState,
+  speakSpeechFeedback,
+  type SpeechRecognitionStatus,
+} from './features/speech/speechRecognition';
+import { useSpeechRecognition } from './features/speech/useSpeechRecognition';
 
 interface ActionHistoryItem {
   id: string;
-  source: '预置示例' | '开发辅助';
+  source: '预置示例' | '开发辅助' | '语音输入';
   label: string;
 }
+
+const SPEECH_STATUS_LABELS: SpeechRecognitionStatus[] = ['idle', 'listening', 'processing', 'error'];
 
 const DEMO_ACTIONS: DrawAction[] = [
   { type: 'create', objectType: 'circle', color: '#ef4444', position: 'top-left', size: 'small' },
@@ -45,22 +55,96 @@ function createInitialActionHistory(): ActionHistoryItem[] {
   })).reverse();
 }
 
+function executeDrawingActionsWithResults(state: DrawingState, actions: DrawAction[]) {
+  const results: DrawingActionExecutionResult[] = [];
+  const nextState = actions.reduce((currentState, action) => {
+    const actionResult = executeDrawingActionWithResult(currentState, action);
+    results.push(actionResult);
+    return actionResult.state;
+  }, state);
+
+  return {
+    state: nextState,
+    results,
+  };
+}
+
+function getTargetedExecutionFeedback(results: DrawingActionExecutionResult[]): string | null {
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    const result = results[index];
+
+    if (result.action.type === 'update' || result.action.type === 'delete') {
+      return result.feedbackText;
+    }
+  }
+
+  return null;
+}
+
 export function App() {
   const [drawingState, setDrawingState] = useState(createDemoDrawingState);
   const [helperInput, setHelperInput] = useState('');
-  const [systemStatus, setSystemStatus] = useState('SVG 画布已就绪，语音识别未接入。');
-  const [recentText, setRecentText] = useState('尚无真实语音识别文本');
+  const [systemStatus, setSystemStatus] = useState('SVG 画布已就绪，请点击开始监听授权麦克风。');
+  const [recentText, setRecentText] = useState('尚无语音识别文本');
   const [actionHistory, setActionHistory] = useState(createInitialActionHistory);
 
+  const executeVoiceCommand = useCallback((transcript: string) => {
+    const parseResult = parseLocalCommand(transcript);
+    const feedback = buildSpeechCommandFeedback(parseResult, transcript);
+
+    setRecentText(`语音识别：${transcript}`);
+
+    if (!feedback.ok) {
+      setSystemStatus(feedback.statusText);
+      feedback.speakFeedback();
+      return;
+    }
+
+    const execution = executeDrawingActionsWithResults(drawingState, feedback.actions);
+    const targetedFeedback = getTargetedExecutionFeedback(execution.results);
+    const finalFeedbackText = targetedFeedback ?? feedback.feedbackText;
+
+    setDrawingState(execution.state);
+    setSystemStatus(`${feedback.statusText} ${finalFeedbackText}`);
+    speakSpeechFeedback(finalFeedbackText);
+    setActionHistory((currentHistory) => [
+      {
+        id: `voice-${currentHistory.length}-${Date.now()}`,
+        source: '语音输入',
+        label: targetedFeedback ?? formatDrawActions(feedback.actions),
+      },
+      ...currentHistory,
+    ]);
+  }, [drawingState]);
+
+  const {
+    status: speechStatus,
+    error: speechError,
+    isSupported: isSpeechSupported,
+    supportMessage,
+    startListening,
+    stopListening,
+  } = useSpeechRecognition({
+    onTranscript: executeVoiceCommand,
+    onError: (nextError) => {
+      setSystemStatus(nextError.message);
+      speakSpeechFeedback(nextError.feedbackText);
+    },
+  });
+  const speechControlState = getSpeechControlState({ isSupported: isSpeechSupported, status: speechStatus });
+
   function executeDevelopmentActions(actions: DrawAction[], sourceText: string, statusText?: string) {
-    setDrawingState((currentState) => actions.reduce(executeDrawingAction, currentState));
+    const execution = executeDrawingActionsWithResults(drawingState, actions);
+    const targetedFeedback = getTargetedExecutionFeedback(execution.results);
+
+    setDrawingState(execution.state);
     setRecentText(`开发辅助输入：${sourceText}`);
-    setSystemStatus(statusText ?? `已执行开发辅助 action：${formatDrawActions(actions)}`);
+    setSystemStatus(targetedFeedback ?? statusText ?? `已执行开发辅助 action：${formatDrawActions(actions)}`);
     setActionHistory((currentHistory) => [
       {
         id: `dev-${currentHistory.length}-${Date.now()}`,
         source: '开发辅助',
-        label: formatDrawActions(actions),
+        label: targetedFeedback ?? formatDrawActions(actions),
       },
       ...currentHistory,
     ]);
@@ -101,6 +185,36 @@ export function App() {
           </section>
 
           <aside className="side-panel" aria-label="绘图状态面板">
+            <section className="tool-panel voice-panel" aria-labelledby="voice-control-heading">
+              <div className="panel-heading">
+                <span className="label">Voice</span>
+                <h2 id="voice-control-heading">语音控制</h2>
+              </div>
+              <div className="speech-status-list" aria-label="语音识别状态">
+                {SPEECH_STATUS_LABELS.map((status) => (
+                  <span key={status} className={speechStatus === status ? 'active' : undefined} aria-current={speechStatus === status}>
+                    {status}
+                  </span>
+                ))}
+              </div>
+              <div className="voice-actions">
+                <button
+                  type="button"
+                  onClick={startListening}
+                  disabled={speechControlState.startDisabled}
+                >
+                  {speechControlState.startLabel}
+                </button>
+                <button type="button" onClick={stopListening} disabled={speechControlState.stopDisabled}>
+                  停止监听
+                </button>
+              </div>
+              <p className="voice-hint">{speechControlState.hintText}</p>
+              <p className="voice-help">浏览器可能会要求你点击一次开始按钮授权麦克风；后续绘图创作通过语音完成。</p>
+              {!isSpeechSupported && <p className="voice-error">{supportMessage}</p>}
+              {speechError && <p className="voice-error">{speechError.message}</p>}
+            </section>
+
             <section className="tool-panel" aria-labelledby="system-status-heading">
               <div className="panel-heading">
                 <span className="label">Status</span>

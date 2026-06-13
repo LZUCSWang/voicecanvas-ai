@@ -1,4 +1,11 @@
-import type { DrawAction, DrawingObjectType, DrawingPosition, DrawingSize } from '../../domain/drawingTypes';
+import type {
+  DrawAction,
+  DrawingObjectType,
+  DrawingPosition,
+  DrawingSize,
+  DrawingTargetSelector,
+  UpdateDrawingChanges,
+} from '../../domain/drawingTypes';
 import { createSceneTemplateActions, type SceneTemplateType } from '../scenes/sceneTemplates';
 
 export type LocalCommandSource = 'local';
@@ -51,7 +58,12 @@ const OBJECT_TYPE_KEYWORDS: Array<{ keywords: string[]; value: DrawingObjectType
   { keywords: ['三角形'], value: 'triangle' },
   { keywords: ['箭头'], value: 'arrow' },
   { keywords: ['直线', '线条'], value: 'line' },
+  { keywords: ['文字', '文本', '标题', '说明'], value: 'text' },
 ];
+
+const FINE_TUNE_TRANSLATE_STEP = 24;
+const FINE_TUNE_SCALE_STEP = 1.15;
+const FINE_TUNE_SMALL_SCALE_STEP = 0.88;
 
 interface ParsedCommandSegment {
   actions: DrawAction[];
@@ -155,6 +167,16 @@ function parseCommandSegment(segment: string): (ParsedCommandSegment & { ok: tru
     return failure(segment, [segment], '当前版本尚未接入撤销动作', '已识别为撤销，但当前 PR 还未实现撤销历史。');
   }
 
+  const fineTuneAction = parseFineTuneCommand(segment);
+
+  if (fineTuneAction) {
+    return {
+      ok: true,
+      actions: [fineTuneAction.action],
+      reason: fineTuneAction.reason,
+    };
+  }
+
   if (segment.includes('变大一点')) {
     return {
       ok: true,
@@ -200,6 +222,204 @@ function parseCommandSegment(segment: string): (ParsedCommandSegment & { ok: tru
   }
 
   return failure(segment, [segment], '未匹配到本地规则', `暂未识别本地命令：“${segment}”。`);
+}
+
+function parseFineTuneCommand(segment: string): { action: DrawAction; reason: string } | null {
+  const deleteCommand = parseDeleteCommand(segment);
+
+  if (deleteCommand) {
+    return deleteCommand;
+  }
+
+  const updateCommand = parseUpdateCommand(segment);
+
+  if (updateCommand) {
+    return updateCommand;
+  }
+
+  return null;
+}
+
+function parseDeleteCommand(segment: string): { action: DrawAction; reason: string } | null {
+  if (!segment.includes('删除')) {
+    return null;
+  }
+
+  const targetText = segment.replace(/^把/, '').replace(/^删除/, '').replace(/^掉/, '').trim();
+  const target = parseTargetSelector(targetText);
+
+  return {
+    action: {
+      type: 'delete',
+      target,
+    },
+    reason: `删除${describeTargetForReason(target)}`,
+  };
+}
+
+function parseUpdateCommand(segment: string): { action: DrawAction; reason: string } | null {
+  const normalizedSegment = segment.replace(/^把/, '').trim();
+  const operation = findUpdateOperation(normalizedSegment);
+
+  if (!operation) {
+    return null;
+  }
+
+  const targetText = normalizedSegment.slice(0, operation.index).trim();
+  const valueText = normalizedSegment.slice(operation.index + operation.keyword.length).trim();
+  const target = parseTargetSelector(targetText);
+  const changes = parseUpdateChanges(operation.keyword, valueText, target);
+
+  if (!changes) {
+    return null;
+  }
+
+  return {
+    action: {
+      type: 'update',
+      target,
+      changes,
+    },
+    reason: `把${describeTargetForReason(target)}${describeChangesForReason(changes, target)}`,
+  };
+}
+
+function findUpdateOperation(segment: string): { keyword: string; index: number } | null {
+  const keywords = [
+    '右移一点',
+    '左移一点',
+    '上移一点',
+    '下移一点',
+    '放大一点',
+    '缩小一点',
+    '调大一点',
+    '调小一点',
+    '变宽一点',
+    '变窄一点',
+    '变高一点',
+    '变矮一点',
+    '拉宽一点',
+    '压窄一点',
+    '拉高一点',
+    '压低一点',
+    '置顶',
+    '置底',
+    '上移一层',
+    '下移一层',
+    '往前一层',
+    '往后一层',
+    '改成',
+    '改为',
+  ];
+
+  const matches = keywords
+    .map((keyword) => ({ keyword, index: segment.indexOf(keyword) }))
+    .filter((match) => match.index >= 0)
+    .sort((left, right) => left.index - right.index);
+
+  return matches[0] ?? null;
+}
+
+function parseTargetSelector(targetText: string): DrawingTargetSelector {
+  const target: DrawingTargetSelector = {
+    strategy: detectTargetStrategy(targetText),
+  };
+  const objectType = detectObjectType(targetText);
+  const color = detectExplicitColor(targetText);
+  const position = detectExplicitPosition(targetText);
+  const textIncludes = extractTextIncludes(targetText);
+
+  if (objectType) {
+    target.objectType = objectType;
+  }
+
+  if (color) {
+    target.color = color;
+  }
+
+  if (position) {
+    target.position = position;
+  }
+
+  if (textIncludes) {
+    target.textIncludes = textIncludes;
+  }
+
+  return target;
+}
+
+function parseUpdateChanges(
+  operation: string,
+  valueText: string,
+  target: DrawingTargetSelector,
+): UpdateDrawingChanges | null {
+  switch (operation) {
+    case '右移一点':
+      return { translate: { dx: FINE_TUNE_TRANSLATE_STEP, dy: 0 } };
+    case '左移一点':
+      return { translate: { dx: -FINE_TUNE_TRANSLATE_STEP, dy: 0 } };
+    case '上移一点':
+      return { translate: { dx: 0, dy: -FINE_TUNE_TRANSLATE_STEP } };
+    case '下移一点':
+      return { translate: { dx: 0, dy: FINE_TUNE_TRANSLATE_STEP } };
+    case '放大一点':
+    case '调大一点':
+      return { scale: FINE_TUNE_SCALE_STEP };
+    case '缩小一点':
+    case '调小一点':
+      return { scale: FINE_TUNE_SMALL_SCALE_STEP };
+    case '变宽一点':
+    case '拉宽一点':
+      return { resize: { dw: FINE_TUNE_TRANSLATE_STEP, dh: 0 } };
+    case '变窄一点':
+    case '压窄一点':
+      return { resize: { dw: -FINE_TUNE_TRANSLATE_STEP, dh: 0 } };
+    case '变高一点':
+    case '拉高一点':
+      return { resize: { dw: 0, dh: FINE_TUNE_TRANSLATE_STEP } };
+    case '变矮一点':
+    case '压低一点':
+      return { resize: { dw: 0, dh: -FINE_TUNE_TRANSLATE_STEP } };
+    case '置顶':
+      return { layer: 'front' };
+    case '置底':
+      return { layer: 'back' };
+    case '上移一层':
+    case '往前一层':
+      return { layer: 'forward' };
+    case '下移一层':
+    case '往后一层':
+      return { layer: 'backward' };
+    case '改成':
+    case '改为':
+      return parseChangeValue(valueText, target);
+    default:
+      return null;
+  }
+}
+
+function parseChangeValue(valueText: string, target: DrawingTargetSelector): UpdateDrawingChanges | null {
+  if (valueText.includes('虚线')) {
+    return { strokeStyle: 'dashed' };
+  }
+
+  if (valueText.includes('实线')) {
+    return { strokeStyle: 'solid' };
+  }
+
+  const color = detectExplicitColor(valueText);
+
+  if (color && target.objectType !== 'text') {
+    return { color };
+  }
+
+  const text = valueText.replace(/^["“”'：:\s]+/, '').replace(/["“”'\s]+$/, '');
+
+  if (text) {
+    return { text };
+  }
+
+  return null;
 }
 
 function parseSceneCommand(segment: string): ParsedCommandSegment | null {
@@ -300,8 +520,30 @@ function detectColor(segment: string): string {
   return COLORS.find((color) => color.keywords.some((keyword) => segment.includes(keyword)))?.value ?? '#111827';
 }
 
+function detectExplicitColor(segment: string): string | null {
+  return COLORS.find((color) => color.keywords.some((keyword) => segment.includes(keyword)))?.value ?? null;
+}
+
 function detectPosition(segment: string): DrawingPosition {
   return POSITION_KEYWORDS.find((position) => position.keywords.some((keyword) => segment.includes(keyword)))?.value ?? 'center';
+}
+
+function detectExplicitPosition(segment: string): DrawingPosition | null {
+  return POSITION_KEYWORDS.find((position) => position.keywords.some((keyword) => segment.includes(keyword)))?.value ?? null;
+}
+
+function detectTargetStrategy(segment: string): DrawingTargetSelector['strategy'] {
+  if (hasAny(segment, ['第一个', '最早', '最前'])) {
+    return 'first';
+  }
+
+  return 'latest';
+}
+
+function extractTextIncludes(segment: string): string | undefined {
+  const match = segment.match(/包含[“"]?([^“”"\s]+)[”"]?/);
+
+  return match?.[1];
 }
 
 function detectSize(segment: string, fallback: DrawingSize): DrawingSize {
@@ -335,6 +577,106 @@ function formatObjectType(objectType: DrawingObjectType): string {
   };
 
   return labels[objectType];
+}
+
+function describeTargetForReason(target: DrawingTargetSelector): string {
+  const objectType = target.objectType ?? 'object';
+  const objectLabel = objectType === 'object' ? '对象' : formatObjectType(objectType);
+
+  if (target.color && target.objectType) {
+    return `${formatColor(target.color)}${objectLabel}`;
+  }
+
+  if (target.position && target.objectType) {
+    return `${formatPosition(target.position)}${objectLabel}`;
+  }
+
+  if (target.textIncludes) {
+    return `包含“${target.textIncludes}”的${objectLabel}`;
+  }
+
+  if (target.strategy === 'first') {
+    return `第一个${objectLabel}`;
+  }
+
+  return `最近的${objectLabel}`;
+}
+
+function describeChangesForReason(changes: UpdateDrawingChanges, target: DrawingTargetSelector): string {
+  if (changes.translate) {
+    if (Math.abs(changes.translate.dx) >= Math.abs(changes.translate.dy) && changes.translate.dx !== 0) {
+      return changes.translate.dx > 0 ? '右移一点' : '左移一点';
+    }
+
+    if (changes.translate.dy !== 0) {
+      return changes.translate.dy > 0 ? '下移一点' : '上移一点';
+    }
+  }
+
+  if (typeof changes.scale === 'number') {
+    if (target.objectType === 'text') {
+      return changes.scale >= 1 ? '调大一点' : '调小一点';
+    }
+
+    return changes.scale >= 1 ? '放大一点' : '缩小一点';
+  }
+
+  if (changes.resize) {
+    if (Math.abs(changes.resize.dw) >= Math.abs(changes.resize.dh) && changes.resize.dw !== 0) {
+      return changes.resize.dw > 0 ? '变宽一点' : '变窄一点';
+    }
+
+    if (changes.resize.dh !== 0) {
+      return changes.resize.dh > 0 ? '变高一点' : '变矮一点';
+    }
+  }
+
+  if (changes.color) {
+    return `改成${formatColor(changes.color)}`;
+  }
+
+  if (typeof changes.text === 'string') {
+    return `改成${changes.text}`;
+  }
+
+  if (changes.strokeStyle) {
+    return changes.strokeStyle === 'dashed' ? '改成虚线' : '改成实线';
+  }
+
+  if (changes.layer) {
+    const labels: Record<NonNullable<UpdateDrawingChanges['layer']>, string> = {
+      front: '置顶',
+      back: '置底',
+      forward: '上移一层',
+      backward: '下移一层',
+    };
+
+    return labels[changes.layer];
+  }
+
+  return '更新';
+}
+
+function formatColor(color: string): string {
+  const colorLabel = COLORS.find((candidate) => candidate.value === color)?.keywords[0];
+
+  return colorLabel ?? color;
+}
+
+function formatPosition(position: DrawingPosition): string {
+  const labels: Record<DrawingPosition, string> = {
+    center: '中间',
+    'top-left': '左上角',
+    'top-right': '右上角',
+    'bottom-left': '左下角',
+    'bottom-right': '右下角',
+    left: '左侧',
+    right: '右侧',
+    top: '上方',
+    bottom: '下方',
+  };
+
+  return labels[position];
 }
 
 function failure(normalizedText: string, segments: string[], reason: string, error: string): LocalCommandParseFailure {

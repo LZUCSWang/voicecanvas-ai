@@ -68,6 +68,87 @@ describe('local Chinese command parser', () => {
     });
   });
 
+  it.each([
+    [
+      '把箭头右移一点',
+      {
+        type: 'update',
+        target: { objectType: 'arrow', strategy: 'latest' },
+        changes: { translate: { dx: 24, dy: 0 } },
+      },
+      '把最近的箭头右移一点',
+    ],
+    [
+      '把最近的矩形放大一点',
+      {
+        type: 'update',
+        target: { objectType: 'rectangle', strategy: 'latest' },
+        changes: { scale: 1.15 },
+      },
+      '把最近的矩形放大一点',
+    ],
+    [
+      '把蓝色矩形改成绿色',
+      {
+        type: 'update',
+        target: { objectType: 'rectangle', color: '#2563eb', strategy: 'latest' },
+        changes: { color: '#16a34a' },
+      },
+      '把蓝色矩形改成绿色',
+    ],
+    [
+      '把右下角文字改成完成',
+      {
+        type: 'update',
+        target: { objectType: 'text', position: 'bottom-right', strategy: 'latest' },
+        changes: { text: '完成' },
+      },
+      '把右下角文字改成完成',
+    ],
+    [
+      '删除最近的矩形',
+      {
+        type: 'delete',
+        target: { objectType: 'rectangle', strategy: 'latest' },
+      },
+      '删除最近的矩形',
+    ],
+    [
+      '把箭头改成虚线',
+      {
+        type: 'update',
+        target: { objectType: 'arrow', strategy: 'latest' },
+        changes: { strokeStyle: 'dashed' },
+      },
+      '把最近的箭头改成虚线',
+    ],
+    [
+      '把文字调大一点',
+      {
+        type: 'update',
+        target: { objectType: 'text', strategy: 'latest' },
+        changes: { scale: 1.15 },
+      },
+      '把最近的文字调大一点',
+    ],
+    [
+      '把矩形置顶',
+      {
+        type: 'update',
+        target: { objectType: 'rectangle', strategy: 'latest' },
+        changes: { layer: 'front' },
+      },
+      '把最近的矩形置顶',
+    ],
+  ])('parses fine-grained command: %s', (command, expectedAction, expectedReason) => {
+    expect(parseLocalCommand(command)).toMatchObject({
+      ok: true,
+      source: 'local',
+      actions: [expectedAction],
+      reason: expectedReason,
+    });
+  });
+
   it('parses clear commands', () => {
     expect(parseLocalCommand('擦掉全部')).toMatchObject({
       ok: true,

@@ -17,6 +17,15 @@ export type DrawingPosition = (typeof DRAWING_POSITIONS)[number];
 export const DRAWING_SIZES = ['small', 'medium', 'large'] as const;
 export type DrawingSize = (typeof DRAWING_SIZES)[number];
 
+export const DRAWING_TARGET_STRATEGIES = ['latest', 'first', 'last'] as const;
+export type DrawingTargetStrategy = (typeof DRAWING_TARGET_STRATEGIES)[number];
+
+export const DRAWING_STROKE_STYLES = ['solid', 'dashed'] as const;
+export type DrawingStrokeStyle = (typeof DRAWING_STROKE_STYLES)[number];
+
+export const DRAWING_LAYER_CHANGES = ['front', 'back', 'forward', 'backward'] as const;
+export type DrawingLayerChange = (typeof DRAWING_LAYER_CHANGES)[number];
+
 export interface DrawingCanvas {
   width: number;
   height: number;
@@ -40,6 +49,12 @@ export interface DrawingSizeSpec {
   height: number;
   strokeWidth: number;
   fontSize: number;
+}
+
+export interface CanvasObjectStyle {
+  strokeWidth?: number;
+  strokeStyle?: DrawingStrokeStyle;
+  fillOpacity?: number;
 }
 
 export type DrawingGeometry =
@@ -79,6 +94,7 @@ export interface CanvasObject {
   size: DrawingSize;
   bounds: SvgBounds;
   geometry: DrawingGeometry;
+  style?: CanvasObjectStyle;
   text?: string;
 }
 
@@ -95,6 +111,7 @@ export interface CreateDrawingAction {
   position?: DrawingPosition;
   size?: DrawingSize;
   text?: string;
+  style?: CanvasObjectStyle;
   customBounds?: SvgBounds;
   customLine?: {
     start: SvgPoint;
@@ -102,20 +119,46 @@ export interface CreateDrawingAction {
   };
 }
 
+export interface DrawingTargetSelector {
+  id?: string;
+  objectType?: DrawingObjectType;
+  color?: string;
+  position?: DrawingPosition;
+  textIncludes?: string;
+  strategy?: DrawingTargetStrategy;
+}
+
+export interface UpdateDrawingChanges {
+  color?: string;
+  position?: DrawingPosition;
+  size?: DrawingSize;
+  text?: string;
+  translate?: {
+    dx: number;
+    dy: number;
+  };
+  scale?: number;
+  resize?: {
+    dw: number;
+    dh: number;
+  };
+  strokeWidthDelta?: number;
+  strokeStyle?: DrawingStrokeStyle;
+  fillOpacityDelta?: number;
+  layer?: DrawingLayerChange;
+}
+
 export interface UpdateDrawingAction {
   type: 'update';
   targetId?: string;
-  changes: {
-    color?: string;
-    position?: DrawingPosition;
-    size?: DrawingSize;
-    text?: string;
-  };
+  target?: DrawingTargetSelector;
+  changes: UpdateDrawingChanges;
 }
 
 export interface DeleteDrawingAction {
   type: 'delete';
   targetId?: string;
+  target?: DrawingTargetSelector;
 }
 
 export interface ClearDrawingAction {
