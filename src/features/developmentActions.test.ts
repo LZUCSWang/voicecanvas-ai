@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEVELOPMENT_ACTION_PRESETS, formatDrawAction, resolveDevelopmentAction } from './developmentActions';
+import {
+  DEVELOPMENT_ACTION_PRESETS,
+  formatDrawAction,
+  resolveDevelopmentAction,
+  resolveDevelopmentActions,
+} from './developmentActions';
 
 describe('development action presets', () => {
   it('resolves typed helper input to a preset drawing action', () => {
@@ -27,10 +32,31 @@ describe('development action presets', () => {
       'line',
       'arrow',
       'text',
+      'flowchart',
+      'mind-map',
+      'comparison',
+      'architecture',
+      'poster',
       'clear',
     ]);
     expect(resolveDevelopmentAction('export')).toBeNull();
     expect(resolveDevelopmentAction('modelscope')).toBeNull();
+  });
+
+  it('resolves scene presets to multiple drawing actions while keeping basic presets available', () => {
+    const flowchartActions = resolveDevelopmentActions('flowchart');
+    const mindMapActions = resolveDevelopmentActions('思维导图');
+    const circleActions = resolveDevelopmentActions('circle');
+
+    expect(flowchartActions?.length).toBeGreaterThan(6);
+    expect(flowchartActions?.[0]).toEqual({ type: 'clear' });
+    expect(flowchartActions).toContainEqual(
+      expect.objectContaining({ type: 'create', objectType: 'text', text: '三步演示流程' }),
+    );
+    expect(mindMapActions?.some((action) => action.type === 'create' && action.objectType === 'circle')).toBe(true);
+    expect(circleActions).toEqual([
+      { type: 'create', objectType: 'circle', color: '#ef4444', position: 'center', size: 'medium' },
+    ]);
   });
 
   it('formats actions for a compact execution history', () => {

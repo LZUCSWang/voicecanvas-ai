@@ -9,6 +9,7 @@ import type {
   DrawingSize,
   DrawingState,
   SvgBounds,
+  SvgPoint,
 } from './drawingTypes';
 
 const DEFAULT_OBJECT_COLOR = '#111827';
@@ -41,6 +42,8 @@ function createObject(state: DrawingState, action: CreateDrawingAction): Drawing
     position: action.position ?? DEFAULT_OBJECT_POSITION,
     size: action.size ?? DEFAULT_OBJECT_SIZE,
     text: action.text,
+    customBounds: action.customBounds,
+    customLine: action.customLine,
     state,
   });
 
@@ -112,9 +115,15 @@ function buildCanvasObject(input: {
   position: DrawingPosition;
   size: DrawingSize;
   text?: string;
+  customBounds?: SvgBounds;
+  customLine?: {
+    start: SvgPoint;
+    end: SvgPoint;
+  };
   state: DrawingState;
 }): CanvasObject {
-  const bounds = getBoundsForPosition(input.position, input.size, input.state.canvas);
+  const bounds =
+    input.customBounds ?? getBoundsForLine(input.customLine) ?? getBoundsForPosition(input.position, input.size, input.state.canvas);
   const object: CanvasObject = {
     id: input.id,
     type: input.type,
@@ -122,7 +131,7 @@ function buildCanvasObject(input: {
     position: input.position,
     size: input.size,
     bounds,
-    geometry: createGeometry(input.type, bounds, input.size),
+    geometry: createGeometry(input.type, bounds, input.size, input.customLine),
   };
 
   if (input.type === 'text') {
@@ -132,7 +141,28 @@ function buildCanvasObject(input: {
   return object;
 }
 
-function createGeometry(type: DrawingObjectType, bounds: SvgBounds, size: DrawingSize): DrawingGeometry {
+function getBoundsForLine(line?: { start: SvgPoint; end: SvgPoint }): SvgBounds | null {
+  if (!line) {
+    return null;
+  }
+
+  const x = Math.min(line.start.x, line.end.x);
+  const y = Math.min(line.start.y, line.end.y);
+
+  return {
+    x,
+    y,
+    width: Math.abs(line.end.x - line.start.x),
+    height: Math.abs(line.end.y - line.start.y),
+  };
+}
+
+function createGeometry(
+  type: DrawingObjectType,
+  bounds: SvgBounds,
+  size: DrawingSize,
+  customLine?: { start: SvgPoint; end: SvgPoint },
+): DrawingGeometry {
   const sizeSpec = getDrawingSizeSpec(size);
   const center = {
     x: bounds.x + bounds.width / 2,
@@ -166,6 +196,14 @@ function createGeometry(type: DrawingObjectType, bounds: SvgBounds, size: Drawin
       };
     case 'line':
     case 'arrow':
+      if (customLine) {
+        return {
+          kind: type,
+          start: customLine.start,
+          end: customLine.end,
+        };
+      }
+
       return {
         kind: type,
         start: { x: bounds.x, y: center.y },

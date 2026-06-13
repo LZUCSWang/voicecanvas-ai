@@ -155,4 +155,45 @@ describe('drawing action executor', () => {
       position: 'bottom',
     });
   });
+
+  it('supports optional custom bounds and custom line points without changing base actions', () => {
+    const actions: DrawAction[] = [
+      {
+        type: 'create',
+        objectType: 'rectangle',
+        color: '#0f766e',
+        position: 'center',
+        size: 'medium',
+        customBounds: { x: 120, y: 80, width: 180, height: 70 },
+      },
+      {
+        type: 'create',
+        objectType: 'arrow',
+        color: '#7c3aed',
+        position: 'center',
+        size: 'small',
+        customLine: {
+          start: { x: 300, y: 115 },
+          end: { x: 460, y: 220 },
+        },
+      },
+    ];
+
+    const state = actions.reduce(executeDrawingAction, createInitialDrawingState());
+
+    expect(state.objects[0]).toMatchObject({
+      type: 'rectangle',
+      bounds: { x: 120, y: 80, width: 180, height: 70 },
+      geometry: { kind: 'rectangle', x: 120, y: 80, width: 180, height: 70 },
+    });
+    expect(state.objects[1]).toMatchObject({
+      type: 'arrow',
+      bounds: { x: 300, y: 115, width: 160, height: 105 },
+      geometry: {
+        kind: 'arrow',
+        start: { x: 300, y: 115 },
+        end: { x: 460, y: 220 },
+      },
+    });
+  });
 });
