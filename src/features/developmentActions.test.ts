@@ -4,6 +4,7 @@ import {
   formatDrawAction,
   resolveDevelopmentAction,
   resolveDevelopmentActions,
+  resolveDevelopmentCommand,
 } from './developmentActions';
 
 describe('development action presets', () => {
@@ -57,6 +58,32 @@ describe('development action presets', () => {
     expect(circleActions).toEqual([
       { type: 'create', objectType: 'circle', color: '#ef4444', position: 'center', size: 'medium' },
     ]);
+  });
+
+  it('routes Chinese helper input through the local parser before preset fallback', () => {
+    const localResult = resolveDevelopmentCommand('画一个登录流程图，然后在右下角写 VoiceCanvas');
+
+    expect(localResult).toMatchObject({
+      ok: true,
+      source: 'local',
+      statusText: expect.stringContaining('本地解析'),
+    });
+    expect(localResult.actions[0]).toEqual({ type: 'clear' });
+    expect(localResult.actions.at(-1)).toMatchObject({
+      type: 'create',
+      objectType: 'text',
+      text: 'VoiceCanvas',
+      position: 'bottom-right',
+    });
+
+    const presetResult = resolveDevelopmentCommand('flowchart');
+
+    expect(presetResult).toMatchObject({
+      ok: true,
+      source: 'preset',
+      statusText: expect.stringContaining('开发辅助 action'),
+    });
+    expect(presetResult.actions.length).toBeGreaterThan(6);
   });
 
   it('formats actions for a compact execution history', () => {

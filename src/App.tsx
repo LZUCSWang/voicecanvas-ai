@@ -8,7 +8,7 @@ import {
   DEVELOPMENT_ACTION_PRESETS,
   formatDrawAction,
   formatDrawActions,
-  resolveDevelopmentActions,
+  resolveDevelopmentCommand,
 } from './features/developmentActions';
 
 interface ActionHistoryItem {
@@ -52,10 +52,10 @@ export function App() {
   const [recentText, setRecentText] = useState('尚无真实语音识别文本');
   const [actionHistory, setActionHistory] = useState(createInitialActionHistory);
 
-  function executeDevelopmentActions(actions: DrawAction[], sourceText: string) {
+  function executeDevelopmentActions(actions: DrawAction[], sourceText: string, statusText?: string) {
     setDrawingState((currentState) => actions.reduce(executeDrawingAction, currentState));
     setRecentText(`开发辅助输入：${sourceText}`);
-    setSystemStatus(`已执行开发辅助 action：${formatDrawActions(actions)}`);
+    setSystemStatus(statusText ?? `已执行开发辅助 action：${formatDrawActions(actions)}`);
     setActionHistory((currentHistory) => [
       {
         id: `dev-${currentHistory.length}-${Date.now()}`,
@@ -69,15 +69,15 @@ export function App() {
   function handleDevelopmentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const actions = resolveDevelopmentActions(helperInput);
+    const resolution = resolveDevelopmentCommand(helperInput);
 
-    if (!actions) {
-      setRecentText(helperInput ? `开发辅助输入：${helperInput}` : '开发辅助输入为空');
-      setSystemStatus('未匹配到开发预置 action。');
+    if (!resolution.ok) {
+      setRecentText(resolution.recentText);
+      setSystemStatus(resolution.statusText);
       return;
     }
 
-    executeDevelopmentActions(actions, helperInput.trim());
+    executeDevelopmentActions(resolution.actions, helperInput.trim(), resolution.statusText);
     setHelperInput('');
   }
 
@@ -144,7 +144,7 @@ export function App() {
               type="text"
               value={helperInput}
               onChange={(event) => setHelperInput(event.target.value)}
-              placeholder="输入预置 action 或 scene，例如 circle、flowchart 或 clear"
+              placeholder="输入中文命令或预置 action，例如 画一个登录流程图、circle 或 clear"
               aria-label="开发辅助 action 输入框"
             />
             <button type="submit">执行</button>
