@@ -575,9 +575,54 @@ describe('AI command fallback', () => {
     });
   });
 
+  it('passes an external abort signal to AI fetch requests', async () => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    let settleRequest: ((response: Response) => void) | undefined;
+    const pendingResponse = new Promise<Response>((resolve) => {
+      settleRequest = resolve;
+    });
+    const fetchFn = vi.fn().mockReturnValue(pendingResponse);
+    const resolve = createAiCommandResolver({ fetchFn });
+
+    const resolutionPromise = resolve('画一个红色圆形', { abortSignal: controller.signal });
+    requestSignal = fetchFn.mock.calls[0][1].signal as AbortSignal;
+    controller.abort();
+    settleRequest?.(
+      jsonResponse({
+        ok: true,
+        result: {
+          actions: [
+            { type: 'create', objectType: 'circle', color: '#ef4444', position: 'center', size: 'medium' },
+          ],
+        },
+      }),
+    );
+    await resolutionPromise;
+
+    expect(requestSignal.aborted).toBe(true);
+  });
+
+  it('does not call AI when the external signal was already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchFn = vi.fn();
+    const resolve = createAiCommandResolver({ fetchFn });
+
+    const result = await resolve('画一个红色圆形', { abortSignal: controller.signal });
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      source: 'local-fallback',
+      actions: [{ type: 'create', objectType: 'circle', color: '#ef4444', position: 'center', size: 'medium' }],
+    });
+  });
+
   it.each([
     ['撤销', { type: 'undo' }, '撤销上一步'],
     ['重做', { type: 'redo' }, '重做上一步'],
+    ['清空画布', { type: 'clear' }, '清空画布'],
     ['导出图片', { type: 'export', format: 'png' }, '导出图片'],
   ])('uses local fallback immediately for offline edit command: %s', async (command, expectedAction, expectedReason) => {
     const fetchFn = vi.fn();
