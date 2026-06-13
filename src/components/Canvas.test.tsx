@@ -43,4 +43,40 @@ describe('Canvas', () => {
 
     expect(markup).toContain('等待绘图动作');
   });
+
+  it('renders optional object style while keeping legacy defaults for old objects', () => {
+    const actions: DrawAction[] = [
+      {
+        type: 'create',
+        objectType: 'rectangle',
+        color: '#2563eb',
+        position: 'center',
+        size: 'medium',
+      },
+      {
+        type: 'update',
+        target: { objectType: 'rectangle' },
+        changes: {
+          strokeStyle: 'dashed',
+          strokeWidthDelta: 2,
+          fillOpacityDelta: -0.04,
+        },
+      },
+      {
+        type: 'create',
+        objectType: 'circle',
+        color: '#ef4444',
+        position: 'left',
+        size: 'small',
+      },
+    ];
+    const state = actions.reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('stroke-dasharray="10 8"');
+    expect(markup).toContain('stroke-width="6"');
+    expect(markup).toContain('fill-opacity="0.1"');
+    expect(markup).toContain('fill-opacity="0.16"');
+  });
 });
