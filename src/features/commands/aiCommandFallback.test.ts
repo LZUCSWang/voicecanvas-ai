@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { executeDrawingAction } from '../../domain/drawingExecutor';
 import { createInitialDrawingState } from '../../domain/drawingState';
-import type { DrawAction, DrawingState } from '../../domain/drawingTypes';
+import type { DrawAction, DrawingHistoryAction, DrawingState } from '../../domain/drawingTypes';
 import {
   AI_UNAVAILABLE_FALLBACK_MESSAGE,
   DEFAULT_AI_COMMAND_TIMEOUT_MS,
@@ -28,6 +28,12 @@ function getCreatedTextValues(actions: DrawAction[]) {
 
     return [];
   });
+}
+
+function getDrawActions(actions: DrawingHistoryAction[]): DrawAction[] {
+  return actions.filter((action): action is DrawAction =>
+    action.type === 'create' || action.type === 'update' || action.type === 'delete' || action.type === 'clear',
+  );
 }
 
 function createState(actions: DrawAction[]): DrawingState {
@@ -243,7 +249,7 @@ describe('AI command fallback', () => {
       actionSummary: '生成 architecture 场景',
     });
     expect(result.actions[0]).toEqual({ type: 'clear' });
-    expect(getCreatedTextValues(result.actions)).toEqual(expect.arrayContaining(['数据流架构图', '云端模型']));
+    expect(getCreatedTextValues(getDrawActions(result.actions))).toEqual(expect.arrayContaining(['数据流架构图', '云端模型']));
     expect(result.statusText).toContain('AI解析(ai)');
     expect(result.statusText).toContain('耗时 264ms');
     expect(result.statusText).toContain('已携带 canvas/conversation/recentActions 上下文');
@@ -569,10 +575,37 @@ describe('AI command fallback', () => {
     });
   });
 
+  it.each([
+    ['撤销', { type: 'undo' }, '撤销上一步'],
+    ['重做', { type: 'redo' }, '重做上一步'],
+    ['导出图片', { type: 'export', format: 'png' }, '导出图片'],
+  ])('uses local fallback immediately for offline edit command: %s', async (command, expectedAction, expectedReason) => {
+    const fetchFn = vi.fn();
+    const resolve = createAiCommandResolver({ fetchFn });
+
+    const result = await resolve(command);
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      source: 'local-fallback',
+      actions: [expectedAction],
+      reason: expectedReason,
+    });
+    expect(result.sentContext).toEqual({
+      conversation: false,
+      canvas: false,
+      recentActions: false,
+    });
+  });
+
   it('documents the fallback decision boundary', () => {
     expect(shouldUseAiParser('画一个登录流程图', parseLocalCommand('画一个登录流程图'))).toBe(true);
     expect(shouldUseAiParser('画一个红色圆形', parseLocalCommand('画一个红色圆形'))).toBe(true);
     expect(shouldUseAiParser('帮我做一个会动的3D动画', parseLocalCommand('帮我做一个会动的3D动画'))).toBe(true);
+    expect(shouldUseAiParser('撤销', parseLocalCommand('撤销'))).toBe(false);
+    expect(shouldUseAiParser('重做', parseLocalCommand('重做'))).toBe(false);
+    expect(shouldUseAiParser('导出图片', parseLocalCommand('导出图片'))).toBe(false);
     expect(shouldUseAiParser('circle', parseLocalCommand('circle'), { forceLocalFallback: true })).toBe(false);
     expect(shouldUseAiParser('', parseLocalCommand(''))).toBe(false);
   });
