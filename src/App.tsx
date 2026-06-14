@@ -91,14 +91,31 @@ function createInitialCommandParseMeta(): CommandParseMeta {
   };
 }
 
-function getTargetedExecutionFeedback(results: DrawingHistoryActionExecutionResult[]): string | null {
+export function getTargetedExecutionFeedback(results: DrawingHistoryActionExecutionResult[]): string | null {
+  const successfulFeedback: string[] = [];
+  const missingFeedback: string[] = [];
+
   for (let index = results.length - 1; index >= 0; index -= 1) {
     const result = results[index];
     const action = result.drawingResult?.action ?? result.action;
 
     if (action.type === 'update' || action.type === 'delete') {
-      return result.drawingResult?.feedbackText ?? result.feedbackText;
+      const feedback = result.drawingResult?.feedbackText ?? result.feedbackText;
+
+      if (result.changed) {
+        successfulFeedback.unshift(feedback);
+      } else if (feedback.startsWith('未找到')) {
+        missingFeedback.unshift(feedback);
+      }
     }
+  }
+
+  if (successfulFeedback.length > 0) {
+    return [...successfulFeedback, ...missingFeedback].join('；');
+  }
+
+  if (missingFeedback.length > 0) {
+    return missingFeedback.at(-1) ?? null;
   }
 
   return null;

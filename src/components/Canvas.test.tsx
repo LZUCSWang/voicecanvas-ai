@@ -104,6 +104,63 @@ describe('Canvas', () => {
     expect(markup).toContain('font-size="19"');
   });
 
+  it('shrinks compact Chinese labels so they stay inside flowchart nodes', () => {
+    const state = [
+      {
+        type: 'create',
+        objectType: 'text',
+        text: '输入用户名密码',
+        color: '#111827',
+        position: 'center',
+        size: 'small',
+        customBounds: { x: 70, y: 166, width: 130, height: 38 },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('>输入用户名密码</text>');
+    expect(markup).toContain('font-size="17"');
+  });
+
+  it('wraps very long Chinese labels when minimum font size still cannot fit one line', () => {
+    const state = [
+      {
+        type: 'create',
+        objectType: 'text',
+        text: '本地兜底：离线可用、规则驱动、响应快、数据安全',
+        color: '#111827',
+        position: 'center',
+        size: 'small',
+        customBounds: { x: 102, y: 170, width: 226, height: 52 },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('font-size="12"');
+    expect(markup).toContain('<tspan');
+  });
+
+  it('keeps Latin words intact when wrapping mixed Chinese and English labels', () => {
+    const state = [
+      {
+        type: 'create',
+        objectType: 'text',
+        text: '本地兜底：依赖本地缓存/规则引擎做fallback，响应快但灵活性低',
+        color: '#111827',
+        position: 'center',
+        size: 'small',
+        customBounds: { x: 102, y: 170, width: 226, height: 52 },
+      } satisfies DrawAction,
+    ].reduce(executeDrawingAction, createInitialDrawingState());
+
+    const markup = renderToStaticMarkup(<Canvas state={state} />);
+
+    expect(markup).toContain('<tspan');
+    expect(markup).toContain('fallback');
+  });
+
   it('keeps arrow heads visually stable when AI makes connector lines thicker', () => {
     const state = [
       {

@@ -22,6 +22,7 @@ npm run dev
 ```bash
 npm run test -- --run
 npm run build
+npm run export:demo
 npm run dev:server
 npm run preview
 ```

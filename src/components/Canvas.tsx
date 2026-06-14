@@ -116,6 +116,8 @@ function renderCanvasObject(object: CanvasObject) {
       );
     case 'text':
       const fontSize = getFittedTextFontSize(object);
+      const textLines = getFittedTextLines(object, fontSize);
+      const lineHeight = Math.round(fontSize * 1.18);
       return (
         <text
           key={object.id}
@@ -128,7 +130,17 @@ function renderCanvasObject(object: CanvasObject) {
           textAnchor="middle"
           dominantBaseline="middle"
         >
-          {object.text}
+          {textLines.length === 1
+            ? object.text
+            : textLines.map((line, index) => (
+              <tspan
+                key={`${object.id}-line-${index}`}
+                x={object.geometry.kind === 'text' ? object.geometry.anchor.x : 0}
+                dy={index === 0 ? -((textLines.length - 1) * lineHeight) / 2 : lineHeight}
+              >
+                {line}
+              </tspan>
+            ))}
         </text>
       );
   }
@@ -178,17 +190,131 @@ function getFittedTextFontSize(object: CanvasObject): number {
     return getDrawingSizeSpec(object.size).fontSize;
   }
 
-  const textLength = object.text?.length ?? 0;
+  const text = object.text ?? '';
+  const textWeight = getTextFitWeight(text);
 
-  if (textLength === 0) {
+  if (textWeight === 0) {
     return object.geometry.fontSize;
   }
 
-  const horizontalFit = Math.floor((object.bounds.width * 1.55) / textLength);
+  const horizontalSafety = hasWideGlyph(text) ? 0.92 : 0.86;
+  const horizontalFit = Math.floor((object.bounds.width * horizontalSafety) / textWeight);
   const verticalFit = Math.floor(object.bounds.height * 0.72);
   const fitted = Math.min(object.geometry.fontSize, horizontalFit, verticalFit);
 
   return Math.max(12, Math.round(fitted));
+}
+
+function getTextFitWeight(text: string): number {
+  return Array.from(text).reduce((weight, character) => weight + getCharacterFitWeight(character), 0);
+}
+
+function getFittedTextLines(object: CanvasObject, fontSize: number): string[] {
+  const text = object.text ?? '';
+  const textWeight = getTextFitWeight(text);
+
+  if (fontSize > 12 || textWeight === 0) {
+    return [text];
+  }
+
+  const horizontalSafety = hasWideGlyph(text) ? 0.92 : 0.86;
+  const maxLineWeight = (object.bounds.width * horizontalSafety) / fontSize;
+
+  if (textWeight <= maxLineWeight) {
+    return [text];
+  }
+
+  const maxLines = Math.max(1, Math.floor(object.bounds.height / (fontSize * 1.18)));
+
+  return wrapTextByWeight(text, maxLineWeight, maxLines);
+}
+
+function wrapTextByWeight(text: string, maxLineWeight: number, maxLines: number): string[] {
+  const lines: string[] = [];
+  let currentLine = '';
+  let currentWeight = 0;
+
+  for (const token of getTextWrapTokens(text)) {
+    const tokenWeight = getTextFitWeight(token);
+
+    if (currentLine && currentWeight + tokenWeight > maxLineWeight) {
+      lines.push(currentLine.trim());
+      currentLine = token.trimStart();
+      currentWeight = getTextFitWeight(currentLine);
+      continue;
+    }
+
+    currentLine += token;
+    currentWeight += tokenWeight;
+  }
+
+  if (currentLine.trim()) {
+    lines.push(currentLine.trim());
+  }
+
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+
+  const visibleLines = lines.slice(0, maxLines);
+  visibleLines[maxLines - 1] = trimTextToWeight(
+    `${visibleLines[maxLines - 1]}${lines.slice(maxLines).join('')}`,
+    maxLineWeight,
+  );
+
+  return visibleLines;
+}
+
+function getTextWrapTokens(text: string): string[] {
+  return text.match(/[A-Za-z0-9]+|\s+|./gu) ?? [];
+}
+
+function trimTextToWeight(text: string, maxWeight: number): string {
+  const suffix = '...';
+  const suffixWeight = getTextFitWeight(suffix);
+  let result = '';
+  let weight = 0;
+
+  for (const character of Array.from(text)) {
+    const characterWeight = getCharacterFitWeight(character);
+
+    if (weight + characterWeight + suffixWeight > maxWeight) {
+      return `${result.trimEnd()}${suffix}`;
+    }
+
+    result += character;
+    weight += characterWeight;
+  }
+
+  return result;
+}
+
+function getCharacterFitWeight(character: string): number {
+  if (/\s/.test(character)) {
+    return 0.35;
+  }
+
+  if (isWideGlyph(character)) {
+    return 1;
+  }
+
+  if (/[A-Z0-9]/.test(character)) {
+    return 0.65;
+  }
+
+  if (/[a-z]/.test(character)) {
+    return 0.58;
+  }
+
+  return 0.35;
+}
+
+function hasWideGlyph(text: string): boolean {
+  return Array.from(text).some(isWideGlyph);
+}
+
+function isWideGlyph(character: string): boolean {
+  return /[\u3000-\u9fff]/.test(character);
 }
 
 function renderLineObject(

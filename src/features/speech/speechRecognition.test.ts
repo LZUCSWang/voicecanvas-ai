@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseLocalCommand } from '../commands/localCommandParser';
 import {
+  SPEECH_SILENCE_COMMIT_DELAY_MS,
   buildSpeechCommandFeedback,
+  configureSpeechRecognitionCapture,
+  createSpeechTranscriptBuffer,
   createSpeechRecognitionError,
   detectSpeechRecognitionSupport,
   extractFinalTranscript,
   getSpeechControlState,
   getNextSpeechStatus,
+  type BrowserSpeechRecognition,
 } from './speechRecognition';
 
 describe('speech recognition helpers', () => {
@@ -86,13 +90,67 @@ describe('speech recognition helpers', () => {
   it('extracts the final transcript from a speech recognition result event', () => {
     const event = {
       results: [
-        [{ transcript: '临时内容' }],
-        [{ transcript: '  画一个登录流程图  ' }],
+        Object.assign([{ transcript: '临时内容' }], { isFinal: true }),
+        Object.assign([{ transcript: '  画一个登录流程图  ' }], { isFinal: true }),
       ],
       resultIndex: 1,
     };
 
     expect(extractFinalTranscript(event)).toBe('画一个登录流程图');
+  });
+
+  it('configures browser speech recognition for silence-based committing', () => {
+    const recognition: BrowserSpeechRecognition = {
+      lang: '',
+      continuous: false,
+      interimResults: false,
+      maxAlternatives: 0,
+      onstart: null,
+      onend: null,
+      onerror: null,
+      onresult: null,
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+
+    configureSpeechRecognitionCapture(recognition, 'zh-CN');
+
+    expect(recognition.lang).toBe('zh-CN');
+    expect(recognition.continuous).toBe(true);
+    expect(recognition.interimResults).toBe(true);
+    expect(recognition.maxAlternatives).toBe(1);
+    expect(SPEECH_SILENCE_COMMIT_DELAY_MS).toBeGreaterThanOrEqual(1000);
+  });
+
+  it('buffers speech fragments so a multi-part sentence commits once after silence', () => {
+    const buffer = createSpeechTranscriptBuffer();
+
+    expect(
+      buffer.appendResult({
+        results: [Object.assign([{ transcript: '  画一个  ' }], { isFinal: true })],
+        resultIndex: 0,
+      }),
+    ).toMatchObject({
+      hasSpeech: true,
+      heardTranscript: '画一个',
+    });
+    expect(buffer.peekTranscript()).toBe('画一个');
+
+    expect(
+      buffer.appendResult({
+        results: [
+          Object.assign([{ transcript: '画一个' }], { isFinal: true }),
+          Object.assign([{ transcript: '  红色圆形  ' }], { isFinal: true }),
+        ],
+        resultIndex: 1,
+      }),
+    ).toMatchObject({
+      hasSpeech: true,
+      heardTranscript: '画一个 红色圆形',
+    });
+
+    expect(buffer.consumeTranscript()).toBe('画一个 红色圆形');
+    expect(buffer.consumeTranscript()).toBe('');
   });
 
   it('builds spoken feedback for basic shapes, scene templates, clear, and failures', () => {

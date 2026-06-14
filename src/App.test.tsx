@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { App } from './App';
+import { App, getTargetedExecutionFeedback } from './App';
+import type { DrawingHistoryActionExecutionResult } from './domain/drawingHistory';
 
 describe('App', () => {
   it('opens directly on the drawing workspace with status and history panels', () => {
@@ -24,6 +25,8 @@ describe('App', () => {
     expect(markup).toContain('导出 PNG');
     expect(markup).toContain('开始监听');
     expect(markup).toContain('浏览器可能会要求你点击一次开始按钮授权麦克风');
+    expect(markup).not.toContain('语音文本备用');
+    expect(markup).not.toContain('按语音执行');
     expect(markup).toContain('开发辅助');
     expect(markup).toContain('输入中文命令或预置 action，例如 画一个登录流程图、撤销、导出图片、circle 或 clear');
     expect(markup).toContain('aria-label="绘图画布区域"');
@@ -32,5 +35,22 @@ describe('App', () => {
     expect(markup).toContain('comparison');
     expect(markup).toContain('architecture');
     expect(markup).toContain('poster');
+  });
+
+  it('summarizes successful targeted edits before missing optional targets', () => {
+    const results = [
+      {
+        action: { type: 'update', target: { objectType: 'arrow' }, changes: { translate: { dx: 24, dy: 0 } } },
+        changed: true,
+        feedbackText: '已把箭头右移一点',
+      },
+      {
+        action: { type: 'update', target: { objectType: 'text', textIncludes: '草稿' }, changes: { text: '草稿整理' } },
+        changed: false,
+        feedbackText: '未找到文字',
+      },
+    ] as DrawingHistoryActionExecutionResult[];
+
+    expect(getTargetedExecutionFeedback(results)).toBe('已把箭头右移一点；未找到文字');
   });
 });

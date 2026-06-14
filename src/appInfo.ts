@@ -1,6 +1,6 @@
 export const appInfo = {
   name: 'VoiceCanvas AI',
-  status: 'edit-history-export',
+  status: 'demo',
   availableFeatures: [
     'SVG drawing canvas',
     'Status and history panels',
