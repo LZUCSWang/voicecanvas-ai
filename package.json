@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:server": "tsx src/server/index.ts",
     "build": "tsc && vite build",
+    "export:demo": "tsx scripts/export-demo-images.ts",
     "test": "vitest",
     "preview": "vite preview"
   },
