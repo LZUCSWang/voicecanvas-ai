@@ -442,7 +442,12 @@ function parseChangeValue(valueText: string, target: DrawingTargetSelector): Upd
 function parseSceneCommand(segment: string): ParsedCommandSegment | null {
   if (segment.includes('流程图')) {
     if (segment.includes('登录')) {
-      return scene('flowchart', '登录流程图', ['打开登录页', '输入账号', '验证身份', '进入工作台'], '生成登录流程图');
+      return scene(
+        'flowchart',
+        '登录流程图',
+        ['打开登录页', '输入用户名密码', '本地校验输入', '请求服务端验证', '登录成功', '进入工作台'],
+        '生成登录流程图',
+      );
     }
 
     return scene('flowchart', '三步流程图', ['语音输入', '本地解析', '生成画面'], '生成三步流程图');
@@ -452,7 +457,7 @@ function parseSceneCommand(segment: string): ParsedCommandSegment | null {
     return scene(
       'comparison',
       segment.includes('本地解析') || segment.includes('云端解析') ? '本地解析 vs 云端解析' : '方案对比图',
-      ['本地解析', '云端解析', '低延迟反馈', '复杂语义兜底'],
+      ['本地规则离线解析', '云端 AI 上下文解析', '低延迟可靠命令', '复杂语义生成场景', '撤销重做可追溯', 'PNG 导出可提交'],
       '生成对比图',
     );
   }

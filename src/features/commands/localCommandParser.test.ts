@@ -196,6 +196,67 @@ describe('local Chinese command parser', () => {
     expect(getTextValues(result.actions)).toContain(expectedTitle);
   });
 
+  it('parses a complete one-minute demo command set with richer scene text', () => {
+    const loginFlow = parseLocalCommand('画一个完整登录流程图');
+
+    expect(loginFlow.ok).toBe(true);
+    expect(loginFlow.actions[0]).toEqual({ type: 'clear' });
+    expect(getTextValues(loginFlow.actions)).toEqual(
+      expect.arrayContaining([
+        '登录流程图',
+        '打开登录页',
+        '输入用户名密码',
+        '本地校验输入',
+        '请求服务端验证',
+        '登录成功',
+        '进入工作台',
+      ]),
+    );
+
+    const refinement = parseLocalCommand('把箭头改成虚线，然后把蓝色矩形放大一点，然后在右下角写 VoiceCanvas Demo');
+
+    expect(refinement.ok).toBe(true);
+    expect(refinement).toMatchObject({
+      actions: [
+        {
+          type: 'update',
+          target: { objectType: 'arrow', strategy: 'latest' },
+          changes: { strokeStyle: 'dashed' },
+        },
+        {
+          type: 'update',
+          target: { objectType: 'rectangle', color: '#2563eb', strategy: 'latest' },
+          changes: { scale: 1.15 },
+        },
+        {
+          type: 'create',
+          objectType: 'text',
+          text: 'VoiceCanvas Demo',
+          position: 'bottom-right',
+        },
+      ],
+    });
+
+    const comparison = parseLocalCommand('做一个本地解析和云端解析的对比图');
+
+    expect(comparison.ok).toBe(true);
+    expect(getTextValues(comparison.actions)).toEqual(
+      expect.arrayContaining([
+        '本地解析 vs 云端解析',
+        '本地规则离线解析',
+        '云端 AI 上下文解析',
+        '低延迟可靠命令',
+        '复杂语义生成场景',
+        '撤销重做可追溯',
+        'PNG 导出可提交',
+      ]),
+    );
+
+    expect(parseLocalCommand('撤销')).toMatchObject({ ok: true, actions: [{ type: 'undo' }] });
+    expect(parseLocalCommand('重做')).toMatchObject({ ok: true, actions: [{ type: 'redo' }] });
+    expect(parseLocalCommand('导出图片')).toMatchObject({ ok: true, actions: [{ type: 'export', format: 'png' }] });
+  });
+
   it('splits connector words into multiple local actions', () => {
     const result = parseLocalCommand('画一个登录流程图，然后在右下角写 VoiceCanvas');
 
