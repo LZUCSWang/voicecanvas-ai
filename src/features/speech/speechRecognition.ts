@@ -56,6 +56,7 @@ export interface SpeechRecognitionAlternativeLike {
 
 export interface SpeechRecognitionResultLike {
   [index: number]: SpeechRecognitionAlternativeLike | undefined;
+  isFinal?: boolean;
 }
 
 export interface SpeechRecognitionResultListLike {
@@ -99,12 +100,27 @@ export interface SpeechControlState {
   hintText: string;
 }
 
+export interface SpeechTranscriptBufferAppendResult {
+  hasSpeech: boolean;
+  heardTranscript: string;
+  finalTranscript: string;
+}
+
+export interface SpeechTranscriptBuffer {
+  appendResult: (event: SpeechRecognitionResultEventLike) => SpeechTranscriptBufferAppendResult;
+  peekTranscript: () => string;
+  consumeTranscript: () => string;
+  hasTranscript: () => boolean;
+  reset: () => void;
+}
+
 const UNSUPPORTED_MESSAGE = '当前浏览器不支持 Web Speech API，请使用 Chrome 打开。';
 const UNSUPPORTED_FEEDBACK = '当前浏览器不支持语音识别，请使用 Chrome 打开。';
 const PERMISSION_MESSAGE = '麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试。';
 const PERMISSION_FEEDBACK = '麦克风权限被拒绝，请允许麦克风后重试。';
 const EMPTY_TRANSCRIPT_MESSAGE = '没有识别到语音文本，请再说一次。';
 const EMPTY_TRANSCRIPT_FEEDBACK = '没有听懂，请换一种说法。';
+export const SPEECH_SILENCE_COMMIT_DELAY_MS = 3000;
 
 export function detectSpeechRecognitionSupport(globalLike?: SpeechRecognitionGlobalLike): SpeechRecognitionSupport {
   const candidate = globalLike?.SpeechRecognition ?? globalLike?.webkitSpeechRecognition ?? null;
@@ -220,6 +236,79 @@ export function extractFinalTranscript(event: SpeechRecognitionResultEventLike):
   }
 
   return transcriptParts.join(' ').trim();
+}
+
+export function configureSpeechRecognitionCapture(recognition: BrowserSpeechRecognition, lang: string): void {
+  recognition.lang = lang;
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+}
+
+export function createSpeechTranscriptBuffer(): SpeechTranscriptBuffer {
+  const finalTranscriptParts: string[] = [];
+  const processedFinalResultIndexes = new Set<number>();
+  let interimTranscript = '';
+
+  const peekTranscript = () => [...finalTranscriptParts, interimTranscript].filter(Boolean).join(' ').trim();
+
+  return {
+    appendResult(event) {
+      const startIndex = Math.max(0, event.resultIndex ?? 0);
+      const finalPartsFromEvent: string[] = [];
+      const interimPartsFromEvent: string[] = [];
+
+      for (let index = startIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = result?.[0]?.transcript?.trim();
+
+        if (!transcript) {
+          continue;
+        }
+
+        if (result?.isFinal) {
+          if (!processedFinalResultIndexes.has(index)) {
+            finalTranscriptParts.push(transcript);
+            finalPartsFromEvent.push(transcript);
+            processedFinalResultIndexes.add(index);
+          }
+          continue;
+        }
+
+        interimPartsFromEvent.push(transcript);
+      }
+
+      if (interimPartsFromEvent.length > 0) {
+        interimTranscript = interimPartsFromEvent.join(' ').trim();
+      } else if (finalPartsFromEvent.length > 0) {
+        interimTranscript = '';
+      }
+
+      return {
+        hasSpeech: Boolean(finalPartsFromEvent.length > 0 || interimPartsFromEvent.length > 0),
+        heardTranscript: peekTranscript(),
+        finalTranscript: finalPartsFromEvent.join(' ').trim(),
+      };
+    },
+    peekTranscript,
+    consumeTranscript() {
+      const transcript = peekTranscript();
+
+      finalTranscriptParts.length = 0;
+      processedFinalResultIndexes.clear();
+      interimTranscript = '';
+
+      return transcript;
+    },
+    hasTranscript() {
+      return Boolean(peekTranscript());
+    },
+    reset() {
+      finalTranscriptParts.length = 0;
+      processedFinalResultIndexes.clear();
+      interimTranscript = '';
+    },
+  };
 }
 
 export function buildSpeechCommandFeedback(result: LocalCommandParseResult, transcript: string): SpeechCommandFeedback {

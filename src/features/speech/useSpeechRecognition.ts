@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  SPEECH_SILENCE_COMMIT_DELAY_MS,
+  configureSpeechRecognitionCapture,
   createSpeechRecognitionError,
+  createSpeechTranscriptBuffer,
   detectSpeechRecognitionSupport,
-  extractFinalTranscript,
   getNextSpeechStatus,
   type BrowserSpeechRecognition,
   type SpeechRecognitionErrorEventLike,
@@ -36,6 +38,9 @@ export function useSpeechRecognition({
 }: UseSpeechRecognitionOptions = {}): UseSpeechRecognitionResult {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const processingResetTimerRef = useRef<number | null>(null);
+  const silenceCommitTimerRef = useRef<number | null>(null);
+  const isCommitPendingRef = useRef(false);
+  const transcriptBufferRef = useRef(createSpeechTranscriptBuffer());
   const [status, setStatus] = useState<SpeechRecognitionStatus>('idle');
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<SpeechRecognitionErrorState | null>(null);
@@ -51,24 +56,97 @@ export function useSpeechRecognition({
     processingResetTimerRef.current = null;
   }, []);
 
+  const clearSilenceCommitTimer = useCallback(() => {
+    if (silenceCommitTimerRef.current === null || typeof window === 'undefined') {
+      return;
+    }
+
+    window.clearTimeout(silenceCommitTimerRef.current);
+    silenceCommitTimerRef.current = null;
+  }, []);
+
+  const scheduleProcessingReset = useCallback(() => {
+    const finishProcessing = () => {
+      processingResetTimerRef.current = null;
+      setStatus((currentStatus) => (currentStatus === 'processing' ? getNextSpeechStatus(currentStatus, 'processed') : currentStatus));
+    };
+
+    if (typeof window === 'undefined') {
+      finishProcessing();
+      return;
+    }
+
+    processingResetTimerRef.current = window.setTimeout(finishProcessing, 350);
+  }, []);
+
   const publishError = useCallback(
     (nextError: SpeechRecognitionErrorState) => {
       clearProcessingResetTimer();
+      clearSilenceCommitTimer();
+      isCommitPendingRef.current = false;
+      transcriptBufferRef.current.reset();
       setError(nextError);
       setStatus(nextError.status);
       onError?.(nextError);
     },
-    [clearProcessingResetTimer, onError],
+    [clearProcessingResetTimer, clearSilenceCommitTimer, onError],
   );
 
   const resetError = useCallback(() => {
     clearProcessingResetTimer();
+    clearSilenceCommitTimer();
+    isCommitPendingRef.current = false;
+    transcriptBufferRef.current.reset();
     setError(null);
     setStatus((currentStatus) => getNextSpeechStatus(currentStatus, 'reset'));
-  }, [clearProcessingResetTimer]);
+  }, [clearProcessingResetTimer, clearSilenceCommitTimer]);
+
+  const processBufferedTranscript = useCallback(
+    (finalTranscript: string) => {
+      if (!finalTranscript) {
+        publishError(createSpeechRecognitionError('empty-transcript'));
+        return;
+      }
+
+      setTranscript(finalTranscript);
+      setError(null);
+      setStatus((currentStatus) => getNextSpeechStatus(currentStatus, 'result'));
+
+      Promise.resolve(onTranscript?.(finalTranscript)).finally(scheduleProcessingReset);
+    },
+    [onTranscript, publishError, scheduleProcessingReset],
+  );
+
+  const finishBufferedTranscript = useCallback(() => {
+    clearSilenceCommitTimer();
+    isCommitPendingRef.current = false;
+
+    const finalTranscript = transcriptBufferRef.current.consumeTranscript();
+    processBufferedTranscript(finalTranscript);
+  }, [clearSilenceCommitTimer, processBufferedTranscript]);
+
+  const requestBufferedTranscriptCommit = useCallback(() => {
+    clearSilenceCommitTimer();
+
+    if (isCommitPendingRef.current) {
+      return;
+    }
+
+    isCommitPendingRef.current = true;
+
+    if (!recognitionRef.current) {
+      finishBufferedTranscript();
+      return;
+    }
+
+    recognitionRef.current.stop();
+  }, [clearSilenceCommitTimer, finishBufferedTranscript]);
 
   const startListening = useCallback(() => {
     clearProcessingResetTimer();
+    clearSilenceCommitTimer();
+    isCommitPendingRef.current = false;
+    transcriptBufferRef.current.reset();
 
     if (!support.isSupported || !support.RecognitionConstructor) {
       publishError(createSpeechRecognitionError('not-supported'));
@@ -80,10 +158,7 @@ export function useSpeechRecognition({
     }
 
     const recognition = new support.RecognitionConstructor();
-    recognition.lang = lang;
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+    configureSpeechRecognitionCapture(recognition, lang);
 
     recognition.onstart = () => {
       setError(null);
@@ -91,30 +166,27 @@ export function useSpeechRecognition({
     };
 
     recognition.onresult = (event: SpeechRecognitionResultEventLike) => {
-      const finalTranscript = extractFinalTranscript(event);
+      const speechUpdate = transcriptBufferRef.current.appendResult(event);
 
-      if (!finalTranscript) {
-        publishError(createSpeechRecognitionError('empty-transcript'));
+      if (!speechUpdate.hasSpeech) {
         return;
       }
 
-      setTranscript(finalTranscript);
+      setTranscript(speechUpdate.heardTranscript);
       setError(null);
-      setStatus((currentStatus) => getNextSpeechStatus(currentStatus, 'result'));
 
-      Promise.resolve(onTranscript?.(finalTranscript)).finally(() => {
-        const finishProcessing = () => {
-          processingResetTimerRef.current = null;
-          setStatus((currentStatus) => (currentStatus === 'processing' ? getNextSpeechStatus(currentStatus, 'processed') : currentStatus));
-        };
+      if (isCommitPendingRef.current) {
+        return;
+      }
 
-        if (typeof window === 'undefined') {
-          finishProcessing();
-          return;
-        }
+      clearSilenceCommitTimer();
 
-        processingResetTimerRef.current = window.setTimeout(finishProcessing, 350);
-      });
+      if (typeof window === 'undefined') {
+        requestBufferedTranscriptCommit();
+        return;
+      }
+
+      silenceCommitTimerRef.current = window.setTimeout(requestBufferedTranscriptCommit, SPEECH_SILENCE_COMMIT_DELAY_MS);
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
@@ -123,7 +195,17 @@ export function useSpeechRecognition({
 
     recognition.onend = () => {
       recognitionRef.current = null;
-      setStatus((currentStatus) => (currentStatus === 'listening' ? getNextSpeechStatus(currentStatus, 'stop') : currentStatus));
+
+      if (isCommitPendingRef.current) {
+        finishBufferedTranscript();
+        return;
+      }
+
+      setStatus((currentStatus) =>
+        currentStatus === 'listening' && !transcriptBufferRef.current.hasTranscript()
+          ? getNextSpeechStatus(currentStatus, 'stop')
+          : currentStatus,
+      );
     };
 
     recognitionRef.current = recognition;
@@ -134,27 +216,47 @@ export function useSpeechRecognition({
       recognitionRef.current = null;
       publishError(createSpeechRecognitionError('unknown'));
     }
-  }, [clearProcessingResetTimer, lang, onTranscript, publishError, support]);
+  }, [
+    clearProcessingResetTimer,
+    clearSilenceCommitTimer,
+    finishBufferedTranscript,
+    lang,
+    publishError,
+    requestBufferedTranscriptCommit,
+    support,
+  ]);
 
   const stopListening = useCallback(() => {
     clearProcessingResetTimer();
+    clearSilenceCommitTimer();
+
+    if (transcriptBufferRef.current.hasTranscript()) {
+      requestBufferedTranscriptCommit();
+      return;
+    }
 
     if (!recognitionRef.current) {
+      transcriptBufferRef.current.reset();
       setStatus((currentStatus) => getNextSpeechStatus(currentStatus, 'stop'));
       return;
     }
 
     recognitionRef.current.stop();
     recognitionRef.current = null;
+    isCommitPendingRef.current = false;
+    transcriptBufferRef.current.reset();
     setStatus((currentStatus) => getNextSpeechStatus(currentStatus, 'stop'));
-  }, [clearProcessingResetTimer]);
+  }, [clearProcessingResetTimer, clearSilenceCommitTimer, requestBufferedTranscriptCommit]);
 
   useEffect(() => {
     return () => {
       clearProcessingResetTimer();
+      clearSilenceCommitTimer();
+      isCommitPendingRef.current = false;
+      transcriptBufferRef.current.reset();
       recognitionRef.current?.abort?.();
     };
-  }, [clearProcessingResetTimer]);
+  }, [clearProcessingResetTimer, clearSilenceCommitTimer]);
 
   return {
     status,
