@@ -68,13 +68,13 @@ export const DEVELOPMENT_ACTION_PRESETS: DevelopmentActionPreset[] = [
   },
   {
     id: 'flowchart',
-    label: '三步演示流程图',
+    label: '完整语音绘图流程',
     aliases: ['flowchart', 'flow chart', '流程图', '三步流程图'],
     actions: withClear(
       createSceneTemplateActions({
         type: 'flowchart',
-        title: '三步演示流程',
-        items: ['语音输入', '解析意图', '生成画面'],
+        title: '完整语音绘图流程',
+        items: ['语音输入', '本地规则解析', 'ModelScope 上下文解析', 'Action 安全校验', 'SVG 画布渲染', 'PNG 导出'],
       }),
     ),
   },
@@ -85,8 +85,8 @@ export const DEVELOPMENT_ACTION_PRESETS: DevelopmentActionPreset[] = [
     actions: withClear(
       createSceneTemplateActions({
         type: 'mind-map',
-        title: '语音绘图',
-        items: ['识别文本', '基础图元', '结构模板', 'SVG 画布'],
+        title: '语音绘图能力',
+        items: ['基础图元', '结构模板', '上下文微调', '历史回退', '导出交付'],
       }),
     ),
   },
@@ -97,8 +97,8 @@ export const DEVELOPMENT_ACTION_PRESETS: DevelopmentActionPreset[] = [
     actions: withClear(
       createSceneTemplateActions({
         type: 'comparison',
-        title: '本地解析 vs 云端解析',
-        items: ['本地解析', '云端兜底', '低延迟', '复杂理解'],
+        title: '本地解析 vs 云端 AI',
+        items: ['本地规则离线解析', '云端 AI 上下文解析', '低延迟可靠命令', '复杂语义生成场景', '撤销重做可追溯', 'PNG 导出可提交'],
       }),
     ),
   },
@@ -109,8 +109,8 @@ export const DEVELOPMENT_ACTION_PRESETS: DevelopmentActionPreset[] = [
     actions: withClear(
       createSceneTemplateActions({
         type: 'architecture',
-        title: 'VoiceCanvas 架构',
-        items: ['语音输入', '本地解析', '场景模板', 'SVG 画布'],
+        title: 'VoiceCanvas 完整链路',
+        items: ['语音识别', '新指令打断旧请求', '当前画布上下文', 'ModelScope 解析', 'Action 安全执行'],
       }),
     ),
   },
@@ -121,8 +121,8 @@ export const DEVELOPMENT_ACTION_PRESETS: DevelopmentActionPreset[] = [
     actions: withClear(
       createSceneTemplateActions({
         type: 'poster',
-        title: 'VoiceCanvas 发布',
-        items: ['说出想法', '生成画面', '准备 Demo'],
+        title: 'VoiceCanvas Demo',
+        items: ['说出需求', '生成结构图', '微调并导出'],
       }),
     ),
   },
