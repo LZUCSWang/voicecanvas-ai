@@ -41,29 +41,83 @@ export function createSceneTemplateActions(input: SceneTemplateInput): DrawActio
 }
 
 function createFlowchartActions(title: string, items: string[]): DrawAction[] {
-  const steps = normalizeItems(items, ['Input', 'Plan', 'Render'], 4);
-  const stepWidth = Math.min(150, Math.floor((680 - (steps.length - 1) * 42) / steps.length));
-  const gap = steps.length > 1 ? (680 - steps.length * stepWidth) / (steps.length - 1) : 0;
-  const y = 210;
-  const height = 82;
+  const steps = normalizeItems(items, ['Input', 'Plan', 'Render'], 6);
   const actions: DrawAction[] = [
     text(title, { x: 170, y: 38, width: 460, height: 46 }, 'medium', INK),
     line({ x: 150, y: 96 }, { x: 650, y: 96 }, MUTED),
   ];
 
+  if (steps.length <= 4) {
+    const stepWidth = Math.min(150, Math.floor((680 - (steps.length - 1) * 42) / steps.length));
+    const gap = steps.length > 1 ? (680 - steps.length * stepWidth) / (steps.length - 1) : 0;
+    const y = 210;
+    const height = 82;
+
+    steps.forEach((step, index) => {
+      const x = 60 + index * (stepWidth + gap);
+      actions.push(rect({ x, y, width: stepWidth, height }, BLUE));
+      actions.push(text(step, { x: x + 10, y: y + 16, width: stepWidth - 20, height: height - 32 }, 'small', INK));
+
+      if (index < steps.length - 1) {
+        actions.push(
+          arrow({ x: x + stepWidth + 10, y: y + height / 2 }, { x: x + stepWidth + gap - 10, y: y + height / 2 }, PURPLE),
+        );
+      }
+    });
+
+    return actions;
+  }
+
+  const stepBounds = createWrappedFlowchartBounds(steps.length);
+
   steps.forEach((step, index) => {
-    const x = 60 + index * (stepWidth + gap);
-    actions.push(rect({ x, y, width: stepWidth, height }, BLUE));
-    actions.push(text(step, { x: x + 10, y: y + 16, width: stepWidth - 20, height: height - 32 }, 'small', INK));
+    const bounds = stepBounds[index];
+    actions.push(rect(bounds, BLUE));
+    actions.push(text(step, { x: bounds.x + 12, y: bounds.y + 14, width: bounds.width - 24, height: bounds.height - 28 }, 'small', INK));
 
     if (index < steps.length - 1) {
-      actions.push(
-        arrow({ x: x + stepWidth + 10, y: y + height / 2 }, { x: x + stepWidth + gap - 10, y: y + height / 2 }, PURPLE),
-      );
+      actions.push(createFlowchartConnector(bounds, stepBounds[index + 1]));
     }
   });
 
   return actions;
+}
+
+function createWrappedFlowchartBounds(stepCount: number): SvgBounds[] {
+  const width = 170;
+  const height = 70;
+  const columnGap = 75;
+  const left = 70;
+  const topRowY = 150;
+  const bottomRowY = 310;
+
+  return Array.from({ length: stepCount }, (_, index) => {
+    if (index < 3) {
+      return { x: left + index * (width + columnGap), y: topRowY, width, height };
+    }
+
+    const rowIndex = index - 3;
+    return { x: left + (2 - rowIndex) * (width + columnGap), y: bottomRowY, width, height };
+  });
+}
+
+function createFlowchartConnector(from: SvgBounds, to: SvgBounds): CreateDrawingAction {
+  const fromCenterY = from.y + from.height / 2;
+  const toCenterY = to.y + to.height / 2;
+
+  if (from.y === to.y && to.x > from.x) {
+    return arrow({ x: from.x + from.width + 12, y: fromCenterY }, { x: to.x - 12, y: toCenterY }, PURPLE);
+  }
+
+  if (from.y === to.y) {
+    return arrow({ x: from.x - 12, y: fromCenterY }, { x: to.x + to.width + 12, y: toCenterY }, PURPLE);
+  }
+
+  return arrow(
+    { x: from.x + from.width / 2, y: from.y + from.height + 12 },
+    { x: to.x + to.width / 2, y: to.y - 12 },
+    PURPLE,
+  );
 }
 
 function createMindMapActions(title: string, items: string[]): DrawAction[] {
@@ -96,13 +150,14 @@ function createComparisonActions(title: string, items: string[]): DrawAction[] {
   const normalized = normalizeItems(items, ['Option A', 'Option B', 'Fast path', 'Deep reasoning'], 6);
   const leftItems = normalized.filter((_, index) => index % 2 === 0);
   const rightItems = normalized.filter((_, index) => index % 2 === 1);
+  const [leftHeading, rightHeading] = createComparisonColumnHeadings(title, leftItems, rightItems);
   const actions: DrawAction[] = [
     text(title, { x: 170, y: 34, width: 460, height: 44 }, 'medium', INK),
     rect({ x: 70, y: 94, width: 290, height: 340 }, BLUE),
     rect({ x: 440, y: 94, width: 290, height: 340 }, PURPLE),
     line({ x: 400, y: 110 }, { x: 400, y: 424 }, MUTED),
-    text('方案 A', { x: 120, y: 114, width: 190, height: 40 }, 'small', INK),
-    text('方案 B', { x: 490, y: 114, width: 190, height: 40 }, 'small', INK),
+    text(leftHeading, { x: 120, y: 114, width: 190, height: 40 }, 'small', INK),
+    text(rightHeading, { x: 490, y: 114, width: 190, height: 40 }, 'small', INK),
   ];
 
   leftItems.forEach((item, index) => {
@@ -119,31 +174,68 @@ function createComparisonActions(title: string, items: string[]): DrawAction[] {
   return actions;
 }
 
+function createComparisonColumnHeadings(title: string, leftItems: string[], rightItems: string[]): [string, string] {
+  const leftText = `${title} ${leftItems.join(' ')}`;
+  const rightText = `${title} ${rightItems.join(' ')}`;
+
+  if (leftText.includes('本地') && (rightText.includes('云端') || rightText.includes('AI'))) {
+    return ['本地规则', '云端 AI'];
+  }
+
+  return ['方案 A', '方案 B'];
+}
+
 function createArchitectureActions(title: string, items: string[]): DrawAction[] {
   if (isTransformerArchitecture(title, items)) {
     return createTransformerArchitectureActions(title, items);
   }
 
   const modules = normalizeItems(items, ['Speech Input', 'Local Parser', 'Scene Templates', 'SVG Canvas'], 5);
+  const layerLeft = 100;
+  const layerWidth = 500;
+  const layerHeight = 48;
+  const layerGap = 30;
+  const layerTop = 86;
+  const layerBounds = modules.map((_, index) => ({
+    x: layerLeft,
+    y: layerTop + index * (layerHeight + layerGap),
+    width: layerWidth,
+    height: layerHeight,
+  }));
+  const moduleBounds = layerBounds.map((bounds) => ({
+    x: 230,
+    y: bounds.y + 8,
+    width: 260,
+    height: 32,
+  }));
   const actions: DrawAction[] = [
     text(title, { x: 140, y: 30, width: 520, height: 44 }, 'medium', INK),
   ];
 
   modules.forEach((module, index) => {
-    const layerBounds = { x: 130, y: 92 + index * 70, width: 540, height: 54 };
-    const moduleBounds = { x: 255, y: 100 + index * 70, width: 290, height: 38 };
-    actions.push(rect(layerBounds, SLATE));
-    actions.push(text(`Layer ${index + 1}`, { x: 148, y: 100 + index * 70, width: 84, height: 38 }, 'small', MUTED));
-    actions.push(rect(moduleBounds, index % 2 === 0 ? BLUE : TEAL));
-    actions.push(text(module, moduleBounds, 'small', INK));
+    const currentLayerBounds = layerBounds[index];
+    const currentModuleBounds = moduleBounds[index];
+    actions.push(rect(currentLayerBounds, SLATE));
+    actions.push(text(`Layer ${index + 1}`, { x: 118, y: currentLayerBounds.y + 8, width: 84, height: 32 }, 'small', MUTED));
+    actions.push(rect(currentModuleBounds, index % 2 === 0 ? BLUE : TEAL));
+    actions.push(text(module, currentModuleBounds, 'small', INK));
 
     if (index < modules.length - 1) {
-      actions.push(arrow({ x: 400, y: 148 + index * 70 }, { x: 400, y: 186 + index * 70 }, AMBER));
+      const nextLayerBounds = layerBounds[index + 1];
+      const nextModuleBounds = moduleBounds[index + 1];
+      actions.push(
+        arrow(
+          { x: centerOf(currentModuleBounds).x, y: currentLayerBounds.y + currentLayerBounds.height + 6 },
+          { x: centerOf(nextModuleBounds).x, y: nextLayerBounds.y - 8 },
+          AMBER,
+        ),
+      );
     }
   });
 
-  actions.push(line({ x: 590, y: 118 }, { x: 590, y: 402 }, PURPLE));
-  actions.push(text('data flow', { x: 606, y: 238, width: 95, height: 42 }, 'small', PURPLE));
+  const lastLayerBounds = layerBounds[layerBounds.length - 1];
+  actions.push(line({ x: 638, y: layerTop + 12 }, { x: 638, y: lastLayerBounds.y + lastLayerBounds.height - 12 }, PURPLE));
+  actions.push(text('data flow', { x: 654, y: 238, width: 95, height: 42 }, 'small', PURPLE));
 
   return actions;
 }

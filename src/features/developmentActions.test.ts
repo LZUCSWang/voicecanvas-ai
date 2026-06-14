@@ -6,6 +6,22 @@ import {
   resolveDevelopmentActions,
   resolveDevelopmentCommand,
 } from './developmentActions';
+import type { DrawingHistoryAction } from '../domain/drawingTypes';
+
+function getTextValues(actions: DrawingHistoryAction[]) {
+  return actions.flatMap((action) => {
+    if (action.type === 'create' && action.objectType === 'text' && action.text) {
+      return [action.text];
+    }
+
+    return [];
+  });
+}
+
+function requireActions(actions: DrawingHistoryAction[] | null): DrawingHistoryAction[] {
+  expect(actions).not.toBeNull();
+  return actions ?? [];
+}
 
 describe('development action presets', () => {
   it('resolves typed helper input to a preset drawing action', () => {
@@ -52,12 +68,57 @@ describe('development action presets', () => {
     expect(flowchartActions?.length).toBeGreaterThan(6);
     expect(flowchartActions?.[0]).toEqual({ type: 'clear' });
     expect(flowchartActions).toContainEqual(
-      expect.objectContaining({ type: 'create', objectType: 'text', text: '三步演示流程' }),
+      expect.objectContaining({ type: 'create', objectType: 'text', text: '完整语音绘图流程' }),
     );
     expect(mindMapActions?.some((action) => action.type === 'create' && action.objectType === 'circle')).toBe(true);
     expect(circleActions).toEqual([
       { type: 'create', objectType: 'circle', color: '#ef4444', position: 'center', size: 'medium' },
     ]);
+  });
+
+  it('uses complete demo copy for every structured scene preset', () => {
+    expect(getTextValues(requireActions(resolveDevelopmentActions('flowchart')))).toEqual(
+      expect.arrayContaining([
+        '完整语音绘图流程',
+        '语音输入',
+        '本地规则解析',
+        'ModelScope 上下文解析',
+        'Action 安全校验',
+        'SVG 画布渲染',
+        'PNG 导出',
+      ]),
+    );
+
+    expect(getTextValues(requireActions(resolveDevelopmentActions('comparison')))).toEqual(
+      expect.arrayContaining([
+        '本地解析 vs 云端 AI',
+        '本地规则离线解析',
+        '云端 AI 上下文解析',
+        '低延迟可靠命令',
+        '复杂语义生成场景',
+        '撤销重做可追溯',
+        'PNG 导出可提交',
+      ]),
+    );
+
+    expect(getTextValues(requireActions(resolveDevelopmentActions('architecture')))).toEqual(
+      expect.arrayContaining([
+        'VoiceCanvas 完整链路',
+        '语音识别',
+        '新指令打断旧请求',
+        '当前画布上下文',
+        'ModelScope 解析',
+        'Action 安全执行',
+      ]),
+    );
+
+    expect(getTextValues(requireActions(resolveDevelopmentActions('mind-map')))).toEqual(
+      expect.arrayContaining(['语音绘图能力', '基础图元', '结构模板', '上下文微调', '历史回退', '导出交付']),
+    );
+
+    expect(getTextValues(requireActions(resolveDevelopmentActions('poster')))).toEqual(
+      expect.arrayContaining(['VoiceCanvas Demo', '说出需求', '生成结构图', '微调并导出']),
+    );
   });
 
   it('routes Chinese helper input through the local parser before preset fallback', () => {

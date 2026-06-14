@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { executeDrawingAction } from '../../domain/drawingExecutor';
 import { createInitialDrawingState } from '../../domain/drawingState';
-import type { DrawAction } from '../../domain/drawingTypes';
+import type { DrawAction, SvgBounds, SvgPoint } from '../../domain/drawingTypes';
 import { createSceneTemplateActions, SCENE_TEMPLATE_TYPES } from './sceneTemplates';
 
 function getTextValues(actions: DrawAction[]) {
@@ -12,6 +12,18 @@ function getTextValues(actions: DrawAction[]) {
 
     return [];
   });
+}
+
+function getCreatedObjects(actions: DrawAction[]) {
+  return actions.filter((action): action is Extract<DrawAction, { type: 'create' }> => action.type === 'create');
+}
+
+function verticalSegmentCrossesBounds(line: { start: SvgPoint; end: SvgPoint }, bounds: SvgBounds): boolean {
+  const minY = Math.min(line.start.y, line.end.y);
+  const maxY = Math.max(line.start.y, line.end.y);
+  const x = line.start.x;
+
+  return x > bounds.x && x < bounds.x + bounds.width && maxY > bounds.y && minY < bounds.y + bounds.height;
 }
 
 describe('scene templates', () => {
@@ -37,6 +49,21 @@ describe('scene templates', () => {
     expect(actions.filter((action) => action.type === 'create' && action.objectType === 'rectangle')).toHaveLength(3);
     expect(actions.filter((action) => action.type === 'create' && action.objectType === 'arrow')).toHaveLength(2);
     expect(getTextValues(actions)).toEqual(expect.arrayContaining(['Demo Flow', 'Listen', 'Understand', 'Draw']));
+  });
+
+  it('keeps every step in a five item flowchart and wraps it onto two rows', () => {
+    const actions = createSceneTemplateActions({
+      type: 'flowchart',
+      title: '登录流程图',
+      items: ['开始', '输入用户名密码', '验证凭据', '成功登录', '结束'],
+    });
+    const rectangles = actions.filter((action) => action.type === 'create' && action.objectType === 'rectangle');
+    const rowYs = new Set(rectangles.map((action) => action.type === 'create' && action.customBounds?.y));
+
+    expect(rectangles).toHaveLength(5);
+    expect(actions.filter((action) => action.type === 'create' && action.objectType === 'arrow')).toHaveLength(4);
+    expect(rowYs.size).toBe(2);
+    expect(getTextValues(actions)).toEqual(expect.arrayContaining(['开始', '输入用户名密码', '验证凭据', '成功登录', '结束']));
   });
 
   it('builds a mind map with a center topic and branch connectors', () => {
@@ -66,6 +93,17 @@ describe('scene templates', () => {
     expect(getTextValues(actions)).toEqual(expect.arrayContaining(['Local vs Cloud', 'Local parsing', 'AI fallback']));
   });
 
+  it('labels local and cloud comparison columns with demo-specific names', () => {
+    const actions = createSceneTemplateActions({
+      type: 'comparison',
+      title: '本地解析 vs 云端 AI',
+      items: ['本地规则离线解析', '云端 AI 上下文解析', '低延迟可靠命令', '复杂语义生成场景'],
+    });
+
+    expect(getTextValues(actions)).toEqual(expect.arrayContaining(['本地规则', '云端 AI']));
+    expect(getTextValues(actions)).not.toEqual(expect.arrayContaining(['方案 A', '方案 B']));
+  });
+
   it('builds an architecture scene with layered modules and data flow arrows', () => {
     const actions = createSceneTemplateActions({
       type: 'architecture',
@@ -76,6 +114,33 @@ describe('scene templates', () => {
     expect(actions.filter((action) => action.type === 'create' && action.objectType === 'rectangle').length).toBeGreaterThan(4);
     expect(actions.filter((action) => action.type === 'create' && action.objectType === 'arrow').length).toBeGreaterThanOrEqual(3);
     expect(getTextValues(actions)).toEqual(expect.arrayContaining(['VoiceCanvas Architecture', 'Speech Input', 'SVG Canvas']));
+  });
+
+  it('keeps architecture connector arrows and the data-flow rail outside layer rectangles', () => {
+    const actions = createSceneTemplateActions({
+      type: 'architecture',
+      title: 'VoiceCanvas 完整链路',
+      items: ['语音识别', '对话历史', '当前画布上下文', 'ModelScope 解析', 'Action 执行'],
+    });
+    const createdObjects = getCreatedObjects(actions);
+    const rectangles = createdObjects
+      .filter((action) => action.objectType === 'rectangle' && action.customBounds)
+      .map((action) => action.customBounds as SvgBounds);
+    const layerRectangles = rectangles.filter((bounds) => bounds.width > 500);
+    const connectorArrows = createdObjects.filter(
+      (action) => action.objectType === 'arrow' && action.customLine && action.customLine.start.x === action.customLine.end.x,
+    );
+    const dataFlowRail = createdObjects.find(
+      (action) => action.objectType === 'line' && action.customLine && action.customLine.start.x === action.customLine.end.x,
+    );
+    const maxLayerRight = Math.max(...layerRectangles.map((bounds) => bounds.x + bounds.width));
+
+    expect(connectorArrows).toHaveLength(4);
+    connectorArrows.forEach((arrow) => {
+      expect(rectangles.some((bounds) => verticalSegmentCrossesBounds(arrow.customLine!, bounds))).toBe(false);
+    });
+    expect(dataFlowRail?.customLine?.start.x).toBeGreaterThan(maxLayerRight + 16);
+    expect(layerRectangles.some((bounds) => verticalSegmentCrossesBounds(dataFlowRail!.customLine!, bounds))).toBe(false);
   });
 
   it('builds a transformer encoder architecture with attention, add norm, feed forward, and vertical flow', () => {
