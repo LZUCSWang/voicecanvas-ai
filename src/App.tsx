@@ -513,7 +513,10 @@ export function App() {
               </div>
               <p className="panel-value">{systemStatus}</p>
             </section>
+          </aside>
+        </div>
 
+        <section className="info-grid" aria-label="解析与历史信息">
             <section className="tool-panel parse-panel" aria-labelledby="parse-status-heading" aria-busy={isCommandProcessing}>
               <div className="panel-heading">
                 <span className="label">Parser</span>
@@ -566,8 +569,7 @@ export function App() {
                 ))}
               </ol>
             </section>
-          </aside>
-        </div>
+        </section>
 
         <section className="developer-panel" aria-label="开发辅助">
           <div>
